@@ -4,7 +4,7 @@ from collections import deque
 import numpy as np
 import heapq as heap
 from slapstack.core_state import State
-from slapstack.core_state_agv_manager import AGV
+from slapstack.core_state_agv_manager import AGV, AgvManager
 from slapstack.core_state_location_manager import LocationManager
 from slapstack.helpers import faster_deepcopy, StorageKeys, VehicleKeys, \
     BatchKeys, TimeKeys, TravelEventKeys, ravel, unravel
@@ -20,13 +20,15 @@ class EventHandleInfo:
             event_to_add,
             travel_event_to_add,
             queued_retrieval_order_to_add,
-            queued_delivery_order_to_add
+            queued_delivery_order_to_add,
+            queued_charging_event_to_add=None
     ):
         self.action_needed = action_needed
         self.event_to_add = event_to_add
         self.travel_event_to_add = travel_event_to_add
         self.queued_retrieval_order_to_add = queued_retrieval_order_to_add
         self.queued_delivery_order_to_add = queued_delivery_order_to_add
+        self.queued_charging_event_to_add = queued_charging_event_to_add
 
 
 class Event:
@@ -125,7 +127,7 @@ class Delivery(Order):
         if (state.agv_manager.agv_available('delivery')
                 and state.delivery_possible(agv_pos, index)):
             agv: AGV = state.agv_manager.book_agv(
-                agv_pos, state.time, index, self.type)
+                agv_pos, state.time, index, self.type, core.events)
             if agv.forks > 1 and agv.available_forks < agv.forks - 1:
                 existing_event = core.events.find_travel_event(
                     agv.id, DeliveryFirstLeg)
@@ -283,6 +285,12 @@ class Travel(Event):
         self.orders = orders
         self.distance_penalty = 0  # from pallet shifts
         state.update_on_travel_event_creation(self.key)
+        self.intercepted = False
+        self.charging_required = False
+        self.charging = False
+
+    def set_intercept(self, intercepted: bool):
+        self.intercepted = intercepted
 
     def __hash__(self):
         return hash(str(self.order.order_number) + self.travel_type)
@@ -291,6 +299,32 @@ class Travel(Event):
         """used for sorting events in heaps"""
         return (self.order.order_number == other.order.order_number
                 and self.travel_type == other.travel_type)
+
+    def _check_battery(self, state: 'State'):
+        return state.agv_manager.charge_needed(False, self.agv_id)
+
+    def _get_charging_travel(self, state: 'State', core, cs=None):
+        agv: AGV = state.agv_manager.agv_index[self.agv_id]
+        agv.scheduled_charging = False
+        if not cs:
+            cs = state.agv_manager.get_charging_station(agv.position, core)
+        ChargingFirstLeg.charging_nr += 1
+        dummy_charging_order = Order(
+            -np.infty, -999, ChargingFirstLeg.charging_nr, -999, False)
+        travel_event = ChargingFirstLeg(
+            state=state,
+            start_point=self.last_node,
+            end_point=(cs[0], cs[1]),
+            travel_type="charging_first_leg",
+            level=0,
+            # source=0,
+            orders=None,
+            order=dummy_charging_order,
+            agv_id=self.agv_id,
+            core=core)
+        state.add_travel_event(travel_event)
+        assert travel_event.order.order_number in state.travel_events.keys()
+        return travel_event
 
     def handle(self, state: State, core=None):
         """executed for all types of travel events - correct nodes are set
@@ -303,20 +337,111 @@ class Travel(Event):
         p = self.distance_penalty
         state.update_on_travel_event_completion(tk, t, d, p)
 
-    def partial_step_handle(self, state: State, elapsed_time: float):
+    def _update_route(self, state: 'State', elapsed_time: float):
+        agvm: AgvManager = state.agv_manager
+        assert len(agvm.booked_idle_positions) + len(
+            agvm.free_idle_positions) == agvm.n_agvs
+        if self.travel_type == 'relocation':
+            assert self.route.end not in state.agv_manager.free_idle_positions
+            assert self.route.end in state.agv_manager.booked_idle_positions
         previous_first_node = self.route.get_first_node()
         state.remove_route(self.route.get_indices())
         self.route.update_path(elapsed_time)
-        state.add_route(self.route.get_indices())
-        cur_total_time = self.route.get_duration()
+        if self.travel_type == 'relocation':
+            assert self.route.end not in state.agv_manager.free_idle_positions
+            assert self.route.end in state.agv_manager.booked_idle_positions
         new_first_node = self.route.get_first_node()
-        state.agv_manager.update_v_matrix(
-            previous_first_node, new_first_node)
+        if previous_first_node != new_first_node:
+            state.add_route(self.route.get_indices())
+        return previous_first_node, new_first_node
+
+    def partial_step_handle(self, state: State, elapsed_time: float):
+        # previous_first_node = self.route.get_first_node()
+        # state.remove_route(self.route.get_indices())
+        # self.route.update_path(elapsed_time)
+        # state.add_route(self.route.get_indices())
+        # cur_total_time = self.route.get_duration()
+        # new_first_node = self.route.get_first_node()
+        # state.agv_manager.update_v_matrix(
+        #     previous_first_node, new_first_node)
+        if len(self.route.get_indices()) <= 1:
+            return
+        previous_first_node, new_first_node = self._update_route(
+            state, elapsed_time)
+        if self.travel_type == 'relocation':
+            state.agv_manager.update_relocating_agv_position(
+                previous_first_node, new_first_node, self.agv_id)
+        else:
+            state.agv_manager.update_v_matrix(
+                previous_first_node, new_first_node)
 
     def __str__(self):
         return (f'{self.travel_type} travel with SKU {self.order.SKU} finishes '
                 f'at {self.time} and takes route {self.route} with duration '
                 f'{self.route.get_duration()} to level {self.level}')
+
+
+class Relocation(Travel):
+    relocation_nr = 0
+
+    def __init__(self, state: 'State', start_point: Tuple[int, int],
+                 agv_id: int):
+        agvm: AgvManager = state.agv_manager
+        assert (len(agvm.free_idle_positions) +
+                len(agvm.booked_idle_positions) == agvm.n_agvs)
+        ids = []
+        positions = []
+        for pos, agv_l in agvm.free_agv_positions.items():
+            positions.append(pos)
+            for agv in agv_l:
+                ids.append(agv.id)
+        assert agv_id in ids
+        assert start_point in positions
+        end_point = agvm.get_close_idle_position(start_point)
+        assert end_point not in agvm.free_idle_positions
+        assert end_point in agvm.booked_idle_positions
+        Relocation.relocation_nr += 1
+        dummy_relocation_order = Order(
+            -np.infty, -999, Relocation.relocation_nr, -999, False)
+        super().__init__(state, start_point, end_point, 'relocation',
+                         0, None, dummy_relocation_order,
+                         TravelEventKeys.RELOCATION, agv_id)
+        assert self.route.end not in agvm.free_idle_positions
+        assert self.route.end in agvm.booked_idle_positions
+        agvm.relocating_agvs.add(agv_id)
+        self.relocation_update_time = state.time
+
+
+    def partial_step_handle(self, state: 'State', elapsed_time: float):
+        # TODO: can this time be a float? when does it get rounded?
+        self.relocation_update_time += elapsed_time
+        super().partial_step_handle(state, elapsed_time)
+
+    def handle(self, state: 'State', core=None):
+        if self.intercepted:
+            return EventHandleInfo(False, None, None, None, None)
+        super().handle(state)
+        agvm: AgvManager = state.agv_manager
+        assert self.agv_id in agvm.relocating_agvs
+        # elapsed_time = round(self.time - self.relocation_update_time)
+        # previous_first_node, new_first_node = self._update_route(
+        #     state, elapsed_time)
+        # assert self.route.end not in state.agv_manager.free_idle_positions
+        # assert self.route.end in state.agv_manager.occupied_idle_positions
+        # agvm.update_relocating_agv_position(
+        #     previous_first_node, new_first_node, self.agv_id)
+        agvm.update_relocating_agv_position(self.route.get_first_node(),
+                                            self.route.get_last_node(),
+                                            self.agv_id)
+        assert self.last_node == self.route.get_last_node()
+        assert self.last_node in agvm.booked_idle_positions
+        assert self.last_node not in agvm.free_idle_positions
+        # assert self.first_node == self.route.get_first_node()
+        agvm.mark_idle_position_arrival(self.last_node, self.agv_id)
+        return EventHandleInfo(False, None, None, None, None)
+
+    def __hash__(self):
+        return super().__hash__()
 
 
 class RetrievalFirstLeg(Travel):
@@ -538,7 +663,8 @@ class RetrievalSecondLeg(Travel):
             state.agv_manager.agv_index.get(self.agv_id).dcc_retrieval_order\
                 = []
             state.agv_manager.release_agv(last_node, state.time, self.agv_id)
-            return EventHandleInfo(False, None, None, None, None)
+            travel = Relocation(state, self.last_node, self.agv_id)
+            return EventHandleInfo(False, travel, travel, None, None)
 
     def __str__(self):
         return super().__str__()
@@ -700,7 +826,8 @@ class DeliverySecondLeg(Travel):
                 agv.dcc_retrieval_order = []
                 state.agv_manager.release_agv(
                     pallet_position[:-1], self.time, self.agv_id)
-                return EventHandleInfo(False, None, None, None, None)
+                travel = Relocation(state, self.last_node, self.agv_id)
+                return EventHandleInfo(False, travel, travel, None, None)
             else:
                 actions = []
                 pending_ret_orders = []
@@ -733,7 +860,8 @@ class DeliverySecondLeg(Travel):
                     agv.dcc_retrieval_order = []
                     state.agv_manager.release_agv(
                         pallet_position[:-1], self.time, self.agv_id)
-                    return EventHandleInfo(False, None, None, event, None)
+                    travel = Relocation(state, self.last_node, self.agv_id)
+                    return EventHandleInfo(False, travel, travel, event, None)
 
     def find_closest_sku_loc(self, state: State, sku: int)\
             -> Tuple[int, int, int]:
@@ -782,6 +910,92 @@ class DeliverySecondLeg(Travel):
         self.retrieval_order.set_completion_time(state.time)
         state.trackers.update_on_order_completion(self.retrieval_order)
         core.logger.log_state()
+
+
+class ChargingFirstLeg(Travel):
+    charging_nr = 0
+
+    def __init__(self, state: 'State', start_point: Tuple[int, int],
+                 end_point: Tuple[int, int], travel_type: str,
+                 level: int, orders, order, agv_id: int, core,
+                 servicing_retrieval_order: Retrieval = None):
+        super().__init__(state, start_point, end_point, travel_type,
+                         level, orders, order,
+                         TravelEventKeys.CHARGING_FIRST_LEG, agv_id)
+        locs = state.agv_manager.get_agv_locations()
+        # assert start_point in locs.keys()
+        idx = 0
+        target_idx = None
+        for agv in locs[start_point]:
+            if agv.id == agv_id:
+                target_idx = idx
+            else:
+                idx += 1
+        # end_pos = state.agv_manager.get_close_idle_position(start_point)
+        self.agv: AGV = state.agv_manager.book_agv(
+            start_point, state.time, target_idx,
+            self.travel_type, core.events)
+
+        assert self.agv.free == False
+        assert self.agv.id == agv_id
+
+    def handle(self, state: 'State', core=None):
+        super().handle(state)
+        self.charging = True
+        state.remove_travel_event(self.order.order_number)
+        state.agv_manager.update_v_matrix(self.first_node, self.last_node, True)
+        state.remove_route(self.route.get_indices())
+        assert self.last_node in np.argwhere(state.agv_manager.router.s[
+                                             :, :, 0] ==
+                                             StorageKeys.CHARGING_STATION)
+        # if cs not booked -> book and create charging event
+        state.agv_manager.book_charging_station(self.last_node, self.agv)
+        assert self.agv in state.agv_manager.booked_charging_stations[
+            self.last_node]
+        assert self.charging == True
+        if state.agv_manager.get_n_depleted_agvs() == 20:
+            pass
+        return EventHandleInfo(True, None, None, None, None)
+
+
+class Charging(Event):
+    def __init__(self, time: int, charging_event_travel: ChargingFirstLeg,
+                 charging_duration: int):
+        super().__init__(time=time, verbose=False)
+        self.agv_id = charging_event_travel.agv_id
+        self.cs_pos = charging_event_travel.last_node
+        self.charging_duration = charging_duration
+        # TODO ensure AMRs don't overlap at charging station
+
+    def handle(self, state: 'State', core=None):
+        super().handle(state)
+        agv = state.agv_manager.agv_index[self.agv_id]
+        agv.n_charging_stops += 1
+        assert agv.charging_needed
+        # TODO check KPI evt. Fallunterschiedung KPI charging nicht travel release
+
+        state.agv_manager.release_agv(
+            self.cs_pos, self.time, self.agv_id)
+        state.agv_manager.charge_battery(self.charging_duration,
+                                         agv_id=self.agv_id)
+        state.agv_manager.release_charging_station(self.cs_pos,
+                                                   state.agv_manager.agv_index[
+                                                       self.agv_id])
+        travel = Relocation(state, self.cs_pos, self.agv_id)
+        charging_event = None
+        if state.agv_manager.queued_charging_events[self.cs_pos]:
+            charging_event = state.agv_manager.queued_charging_events[
+                self.cs_pos].pop()
+        else:
+            for cs in state.agv_manager.queued_charging_events.keys():
+                if state.agv_manager.queued_charging_events[cs]:
+                    charging_event = state.agv_manager.queued_charging_events[
+                        cs].pop()
+                    break
+        state.agv_manager.update_trackers_on_charging_end()
+        #assert charging_event
+        return EventHandleInfo(False, travel, travel, None,
+                               None, charging_event)
 
 
 class EventManager:
@@ -941,7 +1155,7 @@ class EventManager:
     def find_travel_event(
             self, agv_id: int, event_type: Type[Travel]
     ) -> Union[DeliveryFirstLeg, DeliverySecondLeg,
-               RetrievalFirstLeg, RetrievalSecondLeg, Travel]:
+               RetrievalFirstLeg, RetrievalSecondLeg, Relocation, Travel]:
         """
         Finds an already running travel event given the agv_id and the type of
         the desired event.
@@ -953,6 +1167,8 @@ class EventManager:
         :param event_type: The type of travel event.
         :return: The desired Travel event.
         """
+        if type(event_type) == str:
+            event_type = Relocation
         for event in self.current_travel:
             if isinstance(event, event_type) and event.agv_id == agv_id:
                 return event

@@ -286,6 +286,7 @@ class StorageKeys(IntEnum):
     SOURCE = -3
     SINK = -4
     MID_AISLE = -5
+    CHARGING_STATION = -6
 
 
 class VehicleKeys(IntEnum):
@@ -307,6 +308,8 @@ class TravelEventKeys(IntEnum):
     RETRIEVAL_2ND_LEG = 1
     DELIVERY_1ST_LEG = 2
     DELIVERY_2ND_LEG = 3
+    RELOCATION = 4
+    CHARGING_FIRST_LEG = 5
 
 
 class PathKeys:

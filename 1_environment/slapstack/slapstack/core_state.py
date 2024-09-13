@@ -13,7 +13,7 @@ from slapstack.helpers import faster_deepcopy, StorageKeys, TravelEventKeys
 from slapstack.interface_templates import SimulationParameters
 
 if TYPE_CHECKING:
-    from slapstack.core_events import EventManager, Order, DeliveryFirstLeg
+    from slapstack.core_events import EventManager, Order, DeliveryFirstLeg, ChargingFirstLeg
     from slapstack.core_events import RetrievalSecondLeg, RetrievalFirstLeg
 
 
@@ -23,19 +23,27 @@ class TravelEventTrackers:
         self.n_finished_retrieval_2nd_leg = 0
         self.n_finished_delivery_1st_leg = 0
         self.n_finished_delivery_2nd_leg = 0
+        self.n_finished_relocation = 0
+        self.n_finished_charging_1st_leg = 0
         self.n_running_retrieval_1st_leg = 0
         self.n_running_retrieval_2nd_leg = 0
         self.n_running_delivery_1st_leg = 0
         self.n_running_delivery_2nd_leg = 0
+        self.n_running_relocation = 0
+        self.n_running_charging_1st_leg = 0
         self.d_delivery_1st_leg = 0
         self.d_delivery_2nd_leg = 0
         self.d_retrieval_1st_leg = 0
         self.d_retrieval_2nd_leg = 0
+        self.d_relocation = 0
+        self.d_charging_1st_leg = 0
         self.total_shift_distance = 0
         self.t_delivery_1st_leg = 0
         self.t_delivery_2nd_leg = 0
         self.t_retrieval_1st_leg = 0
         self.t_retrieval_2nd_leg = 0
+        self.t_relocation = 0
+        self.t_charging_1st_leg = 0
         self.total_finished_travel = 0
         self.total_travel_time = 0
         self.total_distance_traveled = 0
@@ -54,6 +62,10 @@ class TravelEventTrackers:
             attr_suffix = 'delivery_1st_leg'
         elif event_key == TravelEventKeys.DELIVERY_2ND_LEG:
             attr_suffix = 'delivery_2nd_leg'
+        elif event_key == TravelEventKeys.RELOCATION:
+            attr_suffix = 'relocation'
+        elif event_key == TravelEventKeys.CHARGING_FIRST_LEG:
+            attr_suffix = 'charging_1st_leg'
         else:
             raise ValueError('Unknown TravelEventKey')
         return attr_suffix
@@ -255,12 +267,12 @@ class State:
         self.T = State.__init_arrival_time_matrix(params)
         self.B = State.__init_batch_id_matrix(params)
         # state managers
-        self.agv_manager = AgvManager(params, self.S, rng)
-        self.V = self.agv_manager.V  # Location of Vehicles
         lane_manager = LaneManager(self.S, params)
         self.routing = RouteManager(
             lane_manager, self.S, params.agv_speed, params.unit_distance,
             params.use_case_name)
+        self.agv_manager = AgvManager(params, self.S, rng, self.routing)
+        self.V = self.agv_manager.V  # Location of Vehicles
         self.location_manager = LocationManager(
             self.S, self.T, self.B, lane_manager, events)
         # KPIs and trackers
@@ -406,7 +418,7 @@ class State:
 
     def add_travel_event(
             self, travel_event: Union['DeliveryFirstLeg', 'RetrievalFirstLeg',
-                                      'RetrievalSecondLeg', None]):
+                                      'RetrievalSecondLeg', 'ChargingFirstLeg', None]):
         """adds a Travel event to self.travel_events"""
         if travel_event:
             t = travel_event

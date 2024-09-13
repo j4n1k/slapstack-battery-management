@@ -448,7 +448,7 @@ class SlapCore(gym.Env):
         agv_pos, index = self.state.agv_manager.get_close_agv(
             action[0:2], prev_e.type)
         agv: AGV = self.state.agv_manager.book_agv(
-            agv_pos, self.state.time, index, prev_e.type)
+            agv_pos, self.state.time, index, prev_e.type, self.events)
         cross_dock = lm.source_location
         lm.source_location = None
         delivery_order: Union[Delivery, None] = None
