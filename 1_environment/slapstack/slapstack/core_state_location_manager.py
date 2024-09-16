@@ -12,6 +12,49 @@ if TYPE_CHECKING:
     from slapstack.core_state import TravelEventTrackers, EventManager
 
 
+class LocationTrackers:
+
+    __slots__ = (
+        'n_open_locations', 'n_total_locations', 'n_legal_actions_total',
+        'n_legal_actions_squared_total', 'n_legal_actions_current', 'n_actions_taken',
+        'lane_wise_entropies', 'lane_wise_sku_counts', 'sku_counts',
+        'n_open_locations_per_lane', 'n_total_locations_per_lane', 'sku_pick_time',
+        'sku_cycle_time', 'CYCLE_TIME_ALPHA'
+    )
+
+    def __init__(self, storage_matrix: np.ndarray, lane_manager: LaneManager):
+        # simple trackers
+        self.n_open_locations = len(
+            np.argwhere(storage_matrix == StorageKeys.EMPTY))
+        self.n_total_locations = self.n_open_locations
+        self.n_legal_actions_total = 0
+        self.n_legal_actions_squared_total = 0
+        self.n_legal_actions_current = 0
+        self.n_actions_taken = 0
+
+        # entropy trackers
+        self.lane_wise_entropies = {
+            (aisle, direction): -0.0
+            for aisle, dirs in lane_manager.lane_index.items()
+            for direction, locs in dirs.items()
+        }
+        self.lane_wise_sku_counts: Dict[Dict[Dict[int, int]]] = {}
+        self.sku_counts = defaultdict(int)
+        self.n_open_locations_per_lane: Dict[
+            Tuple[Tuple[int, int], str], int] = {
+            (aisle, direction): len(locs) * storage_matrix.shape[2]
+            for aisle, dirs in lane_manager.lane_index.items()
+            for direction, locs in dirs.items()
+        }  # TODO: REFACTOR!!
+        self.n_total_locations_per_lane = self.n_open_locations_per_lane.copy()
+
+        # turnover trackers
+        self.sku_pick_time = {}
+        self.sku_cycle_time: Dict[int, float] = {}
+        # cycle_time = alpha * cycle_time + (1-alpha) * current_cycle_time
+        self.CYCLE_TIME_ALPHA = 0.7
+
+
 class LocationManager:
     """
     This class is used for datastructures whose values change frequently,
@@ -69,7 +112,7 @@ class LocationManager:
         # Conditional
         self.lane_wise_entropies = {
             (aisle, direction): 0
-            for aisle, dirs in self.lane_manager.lane_clusters.items()
+            for aisle, dirs in self.lane_manager.lane_index.items()
             for direction, locs in dirs.items()
         }
         self.lane_wise_sku_counts: Dict[Dict[Dict[int, int]]] = {}
@@ -77,11 +120,12 @@ class LocationManager:
         self.n_open_locations_per_lane: \
             Dict[Tuple[Tuple[int, int], str], int] = {
                 (aisle, direction): len(locs) * self.n_levels
-                for aisle, dirs in self.lane_manager.lane_clusters.items()
+                for aisle, dirs in self.lane_manager.lane_index.items()
                 for direction, locs in dirs.items()
             }
         self.n_total_locations_per_lane = self.n_open_locations_per_lane.copy()
         self.events = events
+        self.location_trackers = LocationTrackers(storage_matrix, lane_manager)
         self.sink_location = None
         self.source_location = None
         outline = self.S[:, :, 0]
@@ -258,7 +302,7 @@ class LocationManager:
         :return: A list of open locations in raveled form.
         """
         open_locations = set({})
-        for _, lanes in self.lane_manager.lane_clusters.items():
+        for _, lanes in self.lane_manager.lane_index.items():
             if lanes[AccessDirection.ABOVE]:
                 open_locations.add(ravel(
                     lanes[AccessDirection.ABOVE][0] + (0, ), self.S.shape))
@@ -745,7 +789,7 @@ class LocationManager:
             for lane_ap in self.lane_manager.sku_lanes[sku]:
                 direction = (AccessDirection.ABOVE
                              if lane_ap[2] == -1 else AccessDirection.BELOW)
-                lane = self.lane_manager.lane_clusters[lane_ap[0:2]][direction]
+                lane = self.lane_manager.lane_index[lane_ap[0:2]][direction]
                 int_loc = self.__get_first_suitable_tile(lane, sku)
                 if int_loc is not None:
                     closest_pallets.add(int_loc)

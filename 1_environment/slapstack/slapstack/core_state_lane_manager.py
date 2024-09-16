@@ -176,7 +176,7 @@ class LaneManager:
     def __init__(
             self, storage_matrix: np.ndarray, params: SimulationParameters):
         self.tile_access_points = TileAccessPointIndex(storage_matrix)
-        self.lane_clusters, self.n_lanes = self.create_lane_clusters()
+        self.lane_index, self.n_lanes = self.create_lane_clusters()
         self.locked_lanes = set()
         self.full_lanes = set()
         self.pure_lanes = params.pure_lanes
@@ -196,7 +196,7 @@ class LaneManager:
         """
         ap_pos, ap_dir = self.locate_access_point(location)
         self.locked_lanes.add(ap_pos + (ap_dir.value,))
-        return self.lane_clusters[ap_pos][ap_dir]
+        return self.lane_index[ap_pos][ap_dir]
 
     def unlock_lane(self, delivery_action: Tuple[int, int, int],
                     tile: Tuple[int, int]):
@@ -252,7 +252,7 @@ class LaneManager:
 
     def create_lane_assigned_dict(self):
         lane_assigned = dict()
-        for key, value in self.lane_clusters.items():
+        for key, value in self.lane_index.items():
             if value[AccessDirection.ABOVE]:
                 lane_assigned[key + (-1,)] = False
             if value[AccessDirection.BELOW]:
@@ -320,7 +320,7 @@ class LaneManager:
     def get_lane(self, storage_position):
         xy_position = storage_position[0:2]
         aisle, direction = self.locate_access_point(xy_position)
-        lane: Lane = self.lane_clusters[aisle][direction]
+        lane: Lane = self.lane_index[aisle][direction]
         return lane
 
     def get_lane_locations(self, storage_position: Tuple[int, int, int]):
@@ -388,7 +388,7 @@ class LaneManager:
         for lane in lanes:
             direction = (AccessDirection.ABOVE
                          if lane[2] == -1 else AccessDirection.BELOW)
-            lane_cluster = self.lane_clusters[lane[0:2]][direction]
+            lane_cluster = self.lane_index[lane[0:2]][direction]
             for storage_tile in lane_cluster:
                 for i in range(self.S.shape[2]):
                     if asint:

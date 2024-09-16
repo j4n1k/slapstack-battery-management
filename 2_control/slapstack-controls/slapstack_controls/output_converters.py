@@ -3,6 +3,7 @@ from math import sqrt
 import numpy as np
 
 from slapstack.core_state import State
+from slapstack.core_state_location_manager import LocationTrackers
 from slapstack.interface_templates import OutputConverter
 
 
@@ -292,3 +293,200 @@ class FeatureConverter(OutputConverter):
     def calculate_reward(self, state: State, action: int, legal_actions: list) -> float:
         return 0
 
+
+class FeatureConverterCharging(OutputConverter):
+    def __init__(self, feature_list):
+        self.feature_list = feature_list
+        self.fill_level_per_lane = None
+        self.max_queue_len = 0
+        self.avg_delivery_buffer_len = 0
+        self.max_delivery_buffer_len = 0
+        self.avg_retrieval_buffer_len = 0
+        self.max_retrieval_buffer_len = 0
+        self.t_window_util = 1000
+        self.sum_window_util = 0
+        self.util = self.sum_window_util / self.t_window_util
+        self.n_observations = 0
+        self.n_observations_prev = 0
+        self.n_orders_last_step = 0
+        self.n_delivery_orders_last_step = 0
+        self.n_retrieval_orders_last_step = 0
+        self.service_time_last_step = 0
+        self.time_last_step = 0
+        self.n_stacks = 3
+        self.feature_stack = np.zeros((0, 0))
+
+    def init_fill_level_per_lane(self, state: State):
+        lt: LocationTrackers = state.location_manager.location_trackers
+        open_locations = np.array(list(lt.n_open_locations_per_lane.values()))
+        total_locations = np.array(list(lt.n_total_locations_per_lane.values()))
+        try:
+            self.fill_level_per_lane = 1 - open_locations / total_locations
+        except:
+            pass
+
+    @staticmethod
+    def f_get_avg_battery(state: State):
+        return state.agv_manager.get_average_agv_battery() / 100
+
+    @staticmethod
+    def f_get_std_battery(state: State):
+        return state.agv_manager.get_std_agv_battery()
+
+    @staticmethod
+    def f_get_n_charges(state: State):
+        at = state.agv_manager.agv_trackers
+        return np.average(list(at.charges_per_agv.values()))
+
+    @staticmethod
+    def f_get_n_depleted_agvs(state: State):
+        agvm = state.agv_manager
+        return agvm.get_n_depleted_agvs() / agvm.n_agvs
+
+    @staticmethod
+    def f_get_time_next_event(state: State):
+        return state.peek_time_feature
+
+    @staticmethod
+    def f_get_utilization(state: State):
+        agvm = state.agv_manager
+        return agvm.n_busy_agvs / agvm.n_agvs
+
+    def f_get_state_time(self, state: State):
+        # deltas zeit letzer zustand und aktuelle
+        time = 0
+        if state.decision_mode == "charging":
+            if self.time_last_step == 0:
+                time = 0
+            else:
+                time = state.time - self.time_last_step
+        return time
+
+    def f_get_lane_fill_level_avg(self, state: State):
+        if self.fill_level_per_lane is None:
+            self.init_fill_level_per_lane(state)
+        return np.average(self.fill_level_per_lane)
+
+    def f_get_lane_fill_level_std(self, state: State):
+        if self.fill_level_per_lane is None:
+            self.init_fill_level_per_lane(state)
+        return np.std(self.fill_level_per_lane)
+
+    def f_get_avg_entropy(self, state: State):
+        lt = state.location_manager.location_trackers
+        lane_entropy = lt.lane_wise_entropies.values()
+        return sum(lane_entropy) / len(lane_entropy)
+
+    @staticmethod
+    def f_get_global_fill_level(state: State):
+        lt: LocationTrackers = state.location_manager.location_trackers
+        return 1 - lt.n_open_locations / lt.n_total_locations
+
+    def f_get_queue_len_charging_station(self, state: State):
+        agvm = state.agv_manager
+        queue_per_station = {cs: 0 for cs in agvm.free_charging_stations}
+        for cs in agvm.booked_charging_stations.keys():
+            queue_per_station[cs] = len(agvm.booked_charging_stations[cs])
+        if np.average(list(queue_per_station.values())) > self.max_queue_len:
+            self.max_queue_len = np.average(list(queue_per_station.values()))
+        if self.max_queue_len == 0:
+            return 0
+        else:
+            return np.average(list(
+                queue_per_station.values())) / self.max_queue_len
+
+    def f_get_queue_len_retrieval_orders(self, state: State):
+        return (state.trackers.n_queued_retrieval_orders
+                / 330)
+
+    def f_get_queue_len_delivery_orders(self, state: State):
+        return (state.trackers.n_queued_delivery_orders
+                / 240)
+
+    def f_get_throughput_delivery_orders(self, state: State):
+        delivery_orders_now = 0
+        for order in state.trackers.finished_orders:
+            if order.type == "delivery":
+                delivery_orders_now += 1
+        delta_delivery_orders = (delivery_orders_now -
+                                 self.n_delivery_orders_last_step)
+        time_delta = state.time - self.time_last_step
+        self.n_delivery_orders_last_step = delivery_orders_now
+        if time_delta > 0:
+            throughput_delivery = delta_delivery_orders / time_delta
+            return throughput_delivery
+        else:
+            return 0
+
+    def f_get_throughput_retrieval_orders(self, state: State):
+        retrieval_orders_now = 0
+        for order in state.trackers.finished_orders:
+            if order.type == "retrieval":
+                retrieval_orders_now += 1
+        delta_retrieval_orders = (retrieval_orders_now -
+                                  self.n_retrieval_orders_last_step)
+        time_delta = state.time - self.time_last_step
+        self.n_retrieval_orders_last_step = retrieval_orders_now
+        if time_delta > 0:
+            throughput_retrieval = delta_retrieval_orders / time_delta
+            return throughput_retrieval
+        else:
+            return 0
+
+    def modify_state(self, state: State) -> np.ndarray:
+        # if state.decision_mode == "charging":
+        if state.agv_manager.agv_trackers.n_charges == 0:
+            self.time_last_step = state.time
+        features = []
+        for feature_name in self.feature_list:
+            features.append(getattr(self, f'f_get_{feature_name}')(state))
+        if not np.any(self.feature_stack):
+            self.feature_stack = np.zeros((self.n_stacks,
+                                          len(self.feature_list)))
+
+        self.feature_stack = np.stack((self.feature_stack[1],
+                                       self.feature_stack[2],
+                                       np.array(features)))
+        #self.time_last_step = state.time
+        #return np.array(features)
+        return np.array(features)
+        # else:
+        #     return np.zeros((self.n_stacks, len(self.feature_list)))
+
+    def calculate_reward(self, state: State,
+                         action: int, legal_actions: list) -> float:
+        if len(state.trackers.finished_orders) == 0 and self.n_observations != 0:
+            self.n_observations = 0
+            self.n_observations_prev = 0
+            self.n_orders_last_step = 0
+            self.n_delivery_orders_last_step = 0
+            self.n_retrieval_orders_last_step = 0
+            self.service_time_last_step = 0
+            self.time_last_step = 0
+            self.n_stacks = 3
+            self.feature_stack = np.zeros((0, 0))
+
+        if isinstance(action, np.int64) or isinstance(action, np.ndarray):
+            self.n_observations += 1
+            # Reward 0
+            # return - state.trackers.average_service_time
+
+            #Reward 1
+            current_service_time = state.trackers.average_service_time
+            delta_service_time = self.service_time_last_step - current_service_time
+            self.service_time_last_step = current_service_time
+            # self.n_orders_last_step = n_orders_now
+            return delta_service_time
+            #Reward 2
+            # if state.agv_manager.agv_trackers.n_charges == 0:
+            #     self.service_time_last_step = state.trackers.average_service_time
+            #     return 0
+            #
+            # current_service_time = state.trackers.average_service_time
+            # delta_service_time = self.service_time_last_step - current_service_time
+            # self.service_time_last_step = current_service_time
+            # # self.n_orders_last_step = n_orders_now
+            # return delta_service_time
+
+        else:
+            return 0

@@ -581,6 +581,18 @@ class AgvManager:
             utl_sum += agv.utilization
         return utl_sum / len(self.agv_index)
 
+    def get_battery_level_per_agv(self):
+        battery_levels = []
+        for agv in self.agv_index:
+            battery_levels.append(self.agv_index[agv].battery)
+        return battery_levels
+
+    def get_average_agv_battery(self):
+        return np.average(self.get_battery_level_per_agv())
+
+    def get_std_agv_battery(self):
+        return np.std(self.get_battery_level_per_agv())
+
     def get_n_depleted_agvs(self) -> int:
         n_depleted = 0
         for agv in self.agv_index.keys():

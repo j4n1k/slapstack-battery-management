@@ -629,7 +629,7 @@ class ClassBasedStorage(StoragePolicy):
         :return: The zone to lane dictionary.
         """
         lanes: Dict[Tuple[int, int], Dict[str, List[Tuple[int, int]]]]
-        lanes = state.location_manager.lane_manager.lane_clusters
+        lanes = state.location_manager.lane_manager.lane_index
         lane_heap = KeyHeap([], key=lambda x: x.distance)
         for lane_aisle_access in lanes:
             lane = StorageLane(
@@ -674,7 +674,7 @@ class ClassBasedStorage(StoragePolicy):
     def create_zones_by_locations(self, state: State):
         """creates zones_by_locations"""
         zones_by_location = dict()
-        lane_clusters = state.location_manager.lane_manager.lane_clusters
+        lane_clusters = state.location_manager.lane_manager.lane_index
         for zone, lanes in self.zones.items():
             locations_without_level = []
             for lane in lanes:

@@ -1,6 +1,7 @@
 from experiments.experiment_commons import run_episode
 # from slapstack.helpers import parallelize_heterogeneously
 from slapstack.interface_templates import SimulationParameters
+from slapstack_controls.charging_policies import FixedChargePolicy
 from slapstack_controls.storage_policies import ClosestOpenLocation
 # from slapstack_controls.storage_policies import OriginalShortestLeg
 from slapstack_controls.storage_policies import RandomOpenLocation
@@ -55,6 +56,7 @@ if __name__ == '__main__':
         constraints_breached = run_episode(
             simulation_parameters=params,
             storage_strategy=ClosestToDestination(),
+            charging_strategy=FixedChargePolicy(70),
             print_freq=1000,
             stop_condition=True,
             log_dir='./result_data_crosstacks/'

@@ -114,6 +114,8 @@ class SlapCore(gym.Env):
                              "as defined by the interface_templates.py module. "
                              "To deactivate logging pass the empty string.")
         self.logger.set_state(self.state)
+        self.logger.log_data = []
+        assert not self.logger.log_data
 
     # def __init_legal_actions(self):
     #     sc = self.state.sc
@@ -246,12 +248,15 @@ class SlapCore(gym.Env):
         self.print("~" * 150 + "\n" + "reset\n" + "~" * 150)
         self.__init__(self.inpt, self.logger)
         self._assert_orders()
+        self.orders = SlapOrders(self.inpt.params, self.state.n_initial_storage)
         if not self.orders.generate_orders:
             self.create_orders_from_list()
         else:
             self.create_orders_from_distribution()
         self.state.add_orders(self.events.running)
         self._add_initial_pallets()
+        self.state.location_manager.open_storage_locations = set(
+            self.state.location_manager.open_storage_locations)
         assert self.events.running
         self.logger.log_state()
         # self.add_silent_storage_state()

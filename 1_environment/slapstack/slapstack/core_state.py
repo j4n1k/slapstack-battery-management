@@ -261,6 +261,7 @@ class State:
 
         """
         # simulation inpt
+        self.n_initial_storage = -1
         self.params: SimulationParameters = params
         # matrices
         self.S = State.__init_storage_matrix(params)

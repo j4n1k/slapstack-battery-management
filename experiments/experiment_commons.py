@@ -4,6 +4,7 @@ from os.path import exists
 
 import numpy as np
 import pandas as pd
+from stable_baselines3 import DQN, TD3, PPO, SAC
 from tqdm import tqdm
 
 from slapstack import SlapEnv
@@ -80,7 +81,13 @@ class ExperimentLogger(SlapLogger):
             'n_steps',
             'n_decision_steps',
             'fill_level',
-            'entropy'
+            'entropy',
+            # Charging Trackers
+            'n_queued_charging_events',
+            'avg_battery_level',
+            'n_agv_depleted',
+            'n_agv_not_depleted',
+            'n_charging_events'
         ]
         if len(zm.n_open_locations_per_zone) != 0:
             header += [f'fill_zone_{i}'
@@ -118,7 +125,14 @@ class ExperimentLogger(SlapLogger):
             s.n_steps + s.n_silent_steps,
             s.n_steps,
             t.get_fill_level(),
-            ExperimentLogger.__get_lane_entropy(sc)
+            ExperimentLogger.__get_lane_entropy(sc),
+            # Charging Trackers
+            sum(len(lst) for lst in s.agv_manager.queued_charging_events.values()),
+            am.get_average_agv_battery(),
+            am.get_n_depleted_agvs(),
+            am.get_n_charged_agvs(),
+            am.get_n_charging_events()
+
         )
         fill_level_per_zone = tuple(
                 1 - np.array(list(zm.n_open_locations_per_zone.values())) /
@@ -200,14 +214,20 @@ class ExperimentLogger(SlapLogger):
 
 
 class LoopControl:
-    def __init__(self, env: SlapEnv, pbar_on=True):
+    def __init__(self, env: SlapEnv, pbar_on=True, steps_per_episode=None):
         self.done = False
         self.n_decisions = 0
         if pbar_on:
-            total_orders = env.core_env.orders.n_orders
-            finished_orders = len(env.core_env.state.trackers.finished_orders)
-            remaining_orders = total_orders - finished_orders
-            self.pbar = tqdm(total=int(remaining_orders / 2))
+            if not steps_per_episode:
+                total_orders = env.core_env.orders.n_orders
+                finished_orders = len(env.core_env.state.trackers.finished_orders)
+                remaining_orders = total_orders - finished_orders
+                self.pbar = tqdm(total=int(remaining_orders / 2))
+            else:
+                total_orders = env.core_env.orders.n_orders
+                finished_orders = total_orders / steps_per_episode
+                remaining_orders = total_orders - finished_orders
+                self.pbar = tqdm(total=int(steps_per_episode))
         else:
             self.pbar = None
         self.state: State = env.core_env.state
@@ -308,3 +328,38 @@ def get_episode_env(sim_parameters: SimulationParameters,
             n_steps_between_saves=log_frequency,
             nr_zones=nr_zones),
         action_converters=[BatchFIFO()])
+
+def create_output_str(model, net_arch):
+    output_string = None
+    if isinstance(model, DQN):
+        str_net = [str(layer) for layer in net_arch]
+        net = "_".join(str_net)
+        buffer = model.buffer_size
+        batch = model.batch_size
+        e = model.exploration_fraction
+        tau = model.tau
+        update = model.target_update_interval
+        output_string = f"DQN_{buffer}_{batch}_{e}_{net}_{update}_{tau}"
+    elif isinstance(model, TD3):
+        str_net = [str(layer) for layer in net_arch]
+        net = "_".join(str_net)
+        buffer = model.buffer_size
+        batch = model.batch_size
+        tau = model.tau
+        output_string = f"TD3_{buffer}_{batch}__{net}_{tau}"
+    elif isinstance(model, PPO):
+        str_net = [str(layer) for layer in net_arch]
+        net = "_".join(str_net)
+        n_steps = model.n_steps
+        ent_coef = model.ent_coef
+        batch = model.batch_size
+        output_string = f"PPO{n_steps}_{batch}_{net}_{ent_coef}"
+    elif isinstance(model, SAC):
+        str_net = [str(layer) for layer in net_arch]
+        net = "_".join(str_net)
+        buffer = model.buffer_size
+        batch = model.batch_size
+        tau = model.tau
+        update = model.target_update_interval
+        output_string = f"SAC_{buffer}_{batch}_{net}_{update}_{tau}"
+    return output_string

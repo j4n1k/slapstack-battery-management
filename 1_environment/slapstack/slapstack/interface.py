@@ -20,6 +20,8 @@ class SlapEnv(gym.Env):
                  logger: Union[SlapLogger, str, None] = None,
                  state_converter: Union[OutputConverter, None] = None,
                  action_converters: Union[List[StorageStrategy], None] = None):
+        self.last_reward = None
+        self.last_action_taken = None
         if bool(seeds):
             self.__seeds_remaining = seeds[1:]
             self.__seeds_used = [seeds[0]]
@@ -82,6 +84,10 @@ class SlapEnv(gym.Env):
 
     def step(self, action: int):
         # TODO: revisit and refactor this!!
+        # if self.__core.state.params.charging_thresholds:
+        #     self.last_action_taken = action
+        # else:
+        #     self.last_action_taken = action[0]
         direct_action = self.__transform_action(action)
         state, done = self.__core.step(direct_action)
         # assert np.ravel_multi_index(direct_action, self.__core.state.S.shape)[0:2] != (0, 0)
@@ -103,9 +109,9 @@ class SlapEnv(gym.Env):
         return state_repr, reward, done, {}
 
     def test_sameSKU(self):
-        for aisle in self.__core.state.state_cache.lane_manager.lane_clusters:
-            for dir in self.__core.state.state_cache.lane_manager.lane_clusters[aisle]:
-                stacks_in_lane = self.__core.state.state_cache.lane_manager.lane_clusters[aisle][dir]
+        for aisle in self.__core.state.state_cache.lane_manager.lane_index:
+            for dir in self.__core.state.state_cache.lane_manager.lane_index[aisle]:
+                stacks_in_lane = self.__core.state.state_cache.lane_manager.lane_index[aisle][dir]
                 stacks_in_lane = [(*stack, 0) for stack in stacks_in_lane]
                 stacks_in_lane_np = list(zip(*stacks_in_lane))
 
@@ -184,7 +190,8 @@ class SlapEnv(gym.Env):
 
     def __skip_fixed_decisions(self, done):
         state_repr, reward = None, 0
-        while self.autoplay() and not done:
+        while (self.autoplay() and not done and
+               self.__core.decision_mode != "charging"):
             if self.__core.state.current_order == "delivery":
                 action = self.__storage_strategies[0].get_action(
                     self.__core.state)
@@ -208,6 +215,8 @@ class SlapEnv(gym.Env):
                     state_repr = state
             # if self.__output_converter:
             #     assert state_repr.shape == (900, )
+        if self.__core.decision_mode == "charging":
+            self.current_state_repr = state_repr
         return state_repr, reward, done
 
     def autoplay(self):
@@ -288,7 +297,12 @@ class SlapEnv(gym.Env):
             self.action_space = gym.spaces.Discrete(
                 n_rs + n_rows * n_columns * n_levels)
         elif self.__strategy_configuration == 4:
-            return  # not RL; leave action space None
+            if isinstance(self.__core.inpt.params.charging_thresholds, list):
+                n_thresholds = len(self.__core.inpt.params.charging_thresholds)
+                self.action_space = gym.spaces.Discrete(n_thresholds)
+            elif isinstance(self.__core.inpt.params.charging_thresholds, tuple):
+                low, high = self.__core.inpt.params.charging_thresholds
+                self.action_space = gym.spaces.Box(low=low, high=high)
         elif self.__strategy_configuration == 5:
             self.action_space = gym.spaces.Discrete(n_rs)
         elif self.__strategy_configuration == 6:
