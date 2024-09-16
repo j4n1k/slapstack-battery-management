@@ -41,8 +41,11 @@ class SlapEnv(gym.Env):
         self.observation_space = None
         self.__get_action_space()
         self.__get_observation_space()
+        self.done_during_init = False
         if self.autoplay():
-            self.__skip_fixed_decisions(False)
+            _, _, done = self.__skip_fixed_decisions(False)
+            if done:
+                self.done_during_init = True
 
     def make_deterministic(self):
         travel_events = []
@@ -67,7 +70,7 @@ class SlapEnv(gym.Env):
         """
         sto_opt, ret_opt = [], []
         for strategy in selectable_strategies:
-            if strategy.type == 'storage':
+            if strategy.type == 'delivery':
                 sto_opt.append(strategy)
             elif strategy.type == 'retrieval':
                 ret_opt.append(strategy)
