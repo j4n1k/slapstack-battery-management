@@ -102,6 +102,9 @@ class AgvManager:
         self.queued_charging_events: Dict[Tuple[int, int], Deque[Charging]] = {
             cs: [] for cs in self.free_charging_stations}
         self.router = router
+        self.n_charging_stations = len(np.argwhere(self.router.s[:, :, 0]
+                                                   == StorageKeys.CHARGING_STATION))
+        print(self.n_charging_stations)
 
 
     @staticmethod

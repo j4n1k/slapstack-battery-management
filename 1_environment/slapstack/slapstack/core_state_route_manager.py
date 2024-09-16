@@ -19,7 +19,8 @@ class RouteManager:
         layout = storage_matrix[:, :, 0]
         routing_grid = ((layout == StorageKeys.MID_AISLE) |
                         (layout == StorageKeys.SINK) |
-                        (layout == StorageKeys.SOURCE))
+                        (layout == StorageKeys.SOURCE)|
+                        (layout == StorageKeys.CHARGING_STATION))
         self.dims = layout.shape
         self.s = storage_matrix
         # os.remove('distance_mtrix.npy')
