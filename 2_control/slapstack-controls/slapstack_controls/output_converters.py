@@ -454,7 +454,9 @@ class FeatureConverterCharging(OutputConverter):
         #     return np.zeros((self.n_stacks, len(self.feature_list)))
 
     def calculate_reward(self, state: State,
-                         action: int, legal_actions: list) -> float:
+                         action: int,
+                         legal_actions: list,
+                         decision_mode: str) -> float:
         if len(state.trackers.finished_orders) == 0 and self.n_observations != 0:
             self.n_observations = 0
             self.n_observations_prev = 0
@@ -466,7 +468,7 @@ class FeatureConverterCharging(OutputConverter):
             self.n_stacks = 3
             self.feature_stack = np.zeros((0, 0))
 
-        if isinstance(action, np.int64) or isinstance(action, np.ndarray):
+        if decision_mode == "charging":
             self.n_observations += 1
             # Reward 0
             # return - state.trackers.average_service_time

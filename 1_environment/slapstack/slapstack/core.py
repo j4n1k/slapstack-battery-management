@@ -248,7 +248,8 @@ class SlapCore(gym.Env):
         self.print("~" * 150 + "\n" + "reset\n" + "~" * 150)
         self.__init__(self.inpt, self.logger)
         self._assert_orders()
-        self.orders = SlapOrders(self.inpt.params, self.state.n_initial_storage)
+        self.inpt.params.select_partition(0)
+        self.orders = SlapOrders(self.inpt.params, self.state.get_n_storage_locations())
         if not self.orders.generate_orders:
             self.create_orders_from_list()
         else:

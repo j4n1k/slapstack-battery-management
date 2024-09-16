@@ -54,7 +54,7 @@ class OutputConverter:
         pass
 
     def calculate_reward(self, state: 'State', action: int,
-                         legal_actions: list):
+                         legal_actions: list, decision_mode: str):
         pass
 
 
@@ -271,6 +271,26 @@ class SimulationParameters:
             join(root_dir, initial_pallets_path)
         )
 
+    def select_partition(self, partition_idx, period=1):
+        use_case = self.partition_use_case(1)[0]
+        self.n_rows = use_case.layout.shape[0]
+        self.n_columns = use_case.layout.shape[1]
+        self.n_skus = len(use_case.distinct_skus)
+        self.all_skus = use_case.distinct_skus
+        self.n_orders = len(use_case.order_list)
+        self.order_list = use_case.order_list
+        period = list(use_case.initial_skus.keys())[0]
+        # self.initial_pallets_sku_counts = use_case.initial_skus[period]  # self.order_list[0][-1] / p
+        self.initial_pallets_sku_counts, _ = self.load_initial_skus()
+        self.n_sources = len(
+            np.argwhere(use_case.layout == StorageKeys.SOURCE))
+        self.n_sinks = len(np.argwhere(use_case.layout == StorageKeys.SINK))
+        self.layout = use_case.layout
+        self.n_skus_in = use_case.sku_in_counts
+        self.n_skus_out = use_case.sku_out_counts
+        self.sku_period = use_case.current_week
+        self.desired_fill_level = None
+        self.shape = use_case.layout.shape + (use_case.n_levels,)
 
 class UseCasePartition:
     """order = (order_type, sku, time, entrance/exit id, production

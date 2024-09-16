@@ -84,10 +84,11 @@ class SlapEnv(gym.Env):
 
     def step(self, action: int):
         # TODO: revisit and refactor this!!
-        # if self.__core.state.params.charging_thresholds:
-        #     self.last_action_taken = action
-        # else:
-        #     self.last_action_taken = action[0]
+        if self.__core.state.params.charging_thresholds:
+            self.last_action_taken = action
+        else:
+            self.last_action_taken = action[0]
+        decision_mode = self.__core.decision_mode
         direct_action = self.__transform_action(action)
         state, done = self.__core.step(direct_action)
         # assert np.ravel_multi_index(direct_action, self.__core.state.S.shape)[0:2] != (0, 0)
@@ -101,7 +102,9 @@ class SlapEnv(gym.Env):
             return state, None, done, {}
         legal_actions = self.get_legal_actions()
         state_repr = self.__output_converter.modify_state(self.__core.state)
-        reward = self.__output_converter.calculate_reward(self.__core.state, action, legal_actions)
+        reward = self.__output_converter.calculate_reward(self.__core.state, action, legal_actions,
+                                                          decision_mode)
+        self.last_reward = reward
         # self.__update_strategies(direct_action)
         if self.autoplay() and not done:
             # state_repr, reward, done = self.__skip_fixed_decisions(done)
@@ -200,7 +203,8 @@ class SlapEnv(gym.Env):
                     state_repr = self.__output_converter.modify_state(self.__core.state)
                     if not done:
                         legal_actions = self.__core.legal_actions
-                        reward = self.__output_converter.calculate_reward(self.__core.state, action, legal_actions)
+                        reward = self.__output_converter.calculate_reward(self.__core.state, action, legal_actions,
+                                                                          self.__core.decision_mode)
                 else:
                     state_repr = state
             else:  # if current order is a retrieval order
@@ -210,7 +214,8 @@ class SlapEnv(gym.Env):
                     state_repr = self.__output_converter.modify_state(self.__core.state)
                     if not done:
                         legal_actions = self.__core.legal_actions
-                        reward = self.__output_converter.calculate_reward(self.__core.state, action, legal_actions)
+                        reward = self.__output_converter.calculate_reward(self.__core.state, action, legal_actions,
+                                                                          self.__core.decision_mode)
                 else:
                     state_repr = state
             # if self.__output_converter:
