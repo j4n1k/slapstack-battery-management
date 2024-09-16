@@ -32,6 +32,9 @@ class AGV:
         self.servicing_order_type = None
         self.available_forks = self.forks
         self.dcc_retrieval_order = []
+        self.battery = 100
+        self.charging_needed = False
+        self.n_charging_stops = 0
 
     def log_booking(self, booking_time: float):
         """
@@ -77,6 +80,9 @@ class AgvManager:
         :param storage_matrix: The vehicle matrix from which to extract the
             initial AGV positions.
         """
+        self.consumption_rate_unloaded = p.consumption_rate_unloaded
+        self.consumption_rate_loaded = p.consumption_rate_loaded
+        self.charging_rate = p.charging_rate
         self.charge_in_break_started = False
         self.free_agv_positions: Dict[Tuple[int, int], List[AGV]] = {}
         self.agv_index: Dict[int, AGV] = {}
@@ -440,6 +446,74 @@ class AgvManager:
         released_agv.servicing_order_type = None
         # assert agv_id in [v[0].id for k, v in self.free_agv_positions.items()]
 
+    def charge_needed(self, loaded: bool, agv_id: int):
+        # TODO: loaded / unloaded travel
+        agv = self.agv_index[agv_id]
+        max_duration = self.router.max_distance / self.router.speed
+
+        if agv.battery <= max_duration * self.consumption_rate_unloaded:
+            # charging required, travel can not be completed
+            agv.charging_needed = True
+            return True
+
+    def charge_battery(self, charging_time: int, agv_id: int):
+        agv = self.agv_index[agv_id]
+        agv.battery += charging_time * self.charging_rate
+        agv.charging_needed = False
+        assert agv.battery <= 100
+
+    def deplete_battery(self, t, loaded: bool, agv_id: int):
+        agv = self.agv_index[agv_id]
+        if loaded:
+            consumption = self.consumption_rate_loaded * t
+        else:
+            consumption = self.consumption_rate_unloaded * t
+        agv.battery -= consumption
+
+    def get_charging_station(self, agv_position, core):
+        if len(self.free_charging_stations) > 0:
+            cs = self.get_close_charging_station(agv_position)
+            self.free_charging_stations.remove(cs)
+        else:
+            cs = self.get_least_queued_charging_station()
+        return cs
+
+    def book_charging_station(self, cs: Tuple[int, int], agv: AGV):
+        if cs in self.booked_charging_stations.keys():
+            self.booked_charging_stations[cs].append(agv)
+        else:
+            self.booked_charging_stations[cs] = [agv]
+
+    def release_charging_station(self, cs: Tuple[int, int], agv: AGV):
+        idx = self.booked_charging_stations[cs].index(agv)
+        self.booked_charging_stations[cs].pop(idx)
+        if len(self.booked_charging_stations[cs]) == 0:
+            self.free_charging_stations.add(cs)
+
+    def get_close_charging_station(self, agv_position: Tuple[int, int]):
+        selected_station = None
+        min_distance = inf
+        for cs_position in self.free_charging_stations:
+            d = self.router.get_distance(agv_position, (cs_position[0],
+                                                        cs_position[1]))
+            if d < min_distance:
+                selected_station = cs_position
+                min_distance = d
+        assert selected_station is not None
+        return selected_station
+
+    def get_least_queued_charging_station(self):
+        charging_queue = self.queued_charging_events
+        selected_station = None
+        min_queued = inf
+        for cs in charging_queue.keys():
+            n = len(charging_queue[cs])
+            if n < min_queued:
+                selected_station = cs
+                min_queued = n
+        assert selected_station is not None
+        return selected_station
+
     def get_close_idle_position(self, agv_position: Tuple[int, int]):
         assert (len(self.free_idle_positions) +
                 len(self.booked_idle_positions) == self.n_agvs)
@@ -502,6 +576,23 @@ class AgvManager:
         for agv_id, agv in self.agv_index.items():
             utl_sum += agv.utilization
         return utl_sum / len(self.agv_index)
+
+    def get_n_depleted_agvs(self) -> int:
+        n_depleted = 0
+        for agv in self.agv_index.keys():
+            if self.agv_index[agv].charging_needed == True:
+                n_depleted += 1
+        return n_depleted
+
+    def get_n_charged_agvs(self):
+        n_depleted = 0
+        for agv in self.agv_index.keys():
+            if self.agv_index[agv].charging_needed == False:
+                n_depleted += 1
+        return n_depleted
+
+    def get_n_charging_events(self):
+        return self.agv_trackers.n_charges
 
     def mark_idle_position_arrival(self, idle_station, agv_id):
         # self.free_idle_positions.remove(idle_station)

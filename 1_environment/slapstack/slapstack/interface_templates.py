@@ -80,10 +80,27 @@ class SimulationParameters:
                  door_to_door: bool = False,
                  agv_forks: int = 1,
                  material_handling_time: int = 15,
-                 update_partial_paths: bool = False
+                 update_partial_paths: bool = False,
+                 battery_capacity: float = 80,  # 52 80
+                 battery_consumption_h: float = 10,  # 10
+                 battery_consumption_loaded_h: float = 20,  # 15
+                 battery_charging_h: float = 80,  # 80
+                 charging_thresholds: Union[list[int], Tuple[float, float]] = None,
                  ):
 
         # The inpt that are not required when usecase is provided.
+        # https://www.kuka.com/en-de/products/mobility/mobile-platforms/kmp-1500
+        self.battery_charging_h = battery_charging_h
+        self.battery_consumption_h = battery_consumption_h
+        self.battery_consumption_loaded_h = battery_consumption_loaded_h
+        self.battery_capacity = battery_capacity
+        self.consumption_rate_unloaded = ((self.battery_consumption_h / 3600)
+                                          / self.battery_capacity) * 100
+        self.consumption_rate_loaded = ((self.battery_consumption_loaded_h /
+                                         3600) / self.battery_capacity) * 100
+        self.charging_rate = ((self.battery_charging_h / 3600)
+                              / self.battery_capacity) * 100
+        self.charging_thresholds = charging_thresholds
         self.material_handling_time = material_handling_time
         optionals = [
             n_rows, n_columns, n_levels, n_skus, all_skus, n_orders, order_list,

@@ -44,6 +44,7 @@ class RouteManager:
             np.save(dm_name, self.distance_matrix)
             np.save(pred_name, self.predecessors)
         # self.grid = Grid(storage_matrix)
+        self.max_distance = np.argwhere(self.distance_matrix != np.inf).max()
         self.speed = speed
         self.unit_distance = unit_distance
 

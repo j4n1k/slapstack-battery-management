@@ -9,8 +9,11 @@ from slapstack.core_state_location_manager import LocationManager
 from slapstack.helpers import faster_deepcopy, StorageKeys, VehicleKeys, \
     BatchKeys, TimeKeys, TravelEventKeys, ravel, unravel
 from typing import Tuple, MutableSequence, Set, Dict, Deque, Any, Type, List, \
-    Union
+    Union, TYPE_CHECKING
 from slapstack.core_state_route_manager import Route
+
+if TYPE_CHECKING:
+    from slapstack.core_state import State
 
 
 class EventHandleInfo:
@@ -36,6 +39,7 @@ class Event:
     that are the foundation of the processes in the storage location allocation
     problem
     """
+    event_counter = 0
     def __init__(self, time: float, verbose: bool):
         """
 
@@ -47,6 +51,8 @@ class Event:
         """
         self.time = time
         self.verbose = verbose
+        self.id = Event.event_counter
+        Event.event_counter += 1
 
     def __eq__(self, other):
         """used for sorting events in heaps"""
@@ -68,6 +74,9 @@ class Event:
         if self.time > state.time:
             state.time = self.time
         # raise NotImplementedError
+
+    def __hash__(self):
+        return hash(str(self.id))
 
 
 class Order(Event):
@@ -335,6 +344,12 @@ class Travel(Event):
         d = self.route.get_total_distance()
         t = self.route.get_duration()
         p = self.distance_penalty
+        if isinstance(self, DeliverySecondLeg) or isinstance(
+                self, RetrievalSecondLeg):
+            loaded = True
+        else:
+            loaded = False
+        state.agv_manager.deplete_battery(t, loaded, self.agv_id)
         state.update_on_travel_event_completion(tk, t, d, p)
 
     def _update_route(self, state: 'State', elapsed_time: float):
@@ -663,7 +678,10 @@ class RetrievalSecondLeg(Travel):
             state.agv_manager.agv_index.get(self.agv_id).dcc_retrieval_order\
                 = []
             state.agv_manager.release_agv(last_node, state.time, self.agv_id)
-            travel = Relocation(state, self.last_node, self.agv_id)
+            if super()._check_battery(state):
+                travel = super()._get_charging_travel(state, core)
+            else:
+                travel = Relocation(state, self.last_node, self.agv_id)
             return EventHandleInfo(False, travel, travel, None, None)
 
     def __str__(self):
@@ -826,7 +844,10 @@ class DeliverySecondLeg(Travel):
                 agv.dcc_retrieval_order = []
                 state.agv_manager.release_agv(
                     pallet_position[:-1], self.time, self.agv_id)
-                travel = Relocation(state, self.last_node, self.agv_id)
+                if super()._check_battery(state):
+                    travel = super()._get_charging_travel(state, core)
+                else:
+                    travel = Relocation(state, self.last_node, self.agv_id)
                 return EventHandleInfo(False, travel, travel, None, None)
             else:
                 actions = []
@@ -953,8 +974,6 @@ class ChargingFirstLeg(Travel):
         assert self.agv in state.agv_manager.booked_charging_stations[
             self.last_node]
         assert self.charging == True
-        if state.agv_manager.get_n_depleted_agvs() == 20:
-            pass
         return EventHandleInfo(True, None, None, None, None)
 
 

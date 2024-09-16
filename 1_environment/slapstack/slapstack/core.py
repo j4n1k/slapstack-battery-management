@@ -5,7 +5,7 @@ import gym
 import numpy as np
 from slapstack.core_events import (Retrieval, RetrievalFirstLeg,
                                    DeliverySecondLeg, Travel, Delivery, Event,
-                                   DeliveryFirstLeg, RetrievalSecondLeg, Charging)
+                                   DeliveryFirstLeg, RetrievalSecondLeg, Charging, ChargingFirstLeg)
 from slapstack.core_state import State
 from slapstack.core_state_agv_manager import AGV
 from slapstack.core_state_lane_manager import LaneManager
@@ -323,6 +323,8 @@ class SlapCore(gym.Env):
         :return: True if the Event handled requires simulation control action
             (storage/retrieval decisions)
         """
+        if isinstance(next_event, Charging):
+            print()
         if next_event in self.events.current_travel:
             # noinspection PyTypeChecker
             next_event: Travel
@@ -552,6 +554,11 @@ class SlapCore(gym.Env):
                 self.previous_event = this_event
                 self.SKU_counts[this_event.SKU] -= 1
                 self.print("SKU counts: " + str(self.SKU_counts))
+        if isinstance(this_event, ChargingFirstLeg): #and this_event.charging (Wozu war das?)
+            assert this_event.charging
+            self.decision_mode = "charging"
+            self.state.decision_mode = "charging"
+            self.previous_event = this_event
 
     def process_travel_events(self, elapsed_time: float):
         """ if time has elapsed, update any currently active travel events"""
