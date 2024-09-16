@@ -321,6 +321,10 @@ class SlapEnv(gym.Env):
         :param agent_action: The action as chosen by the agent.
         :return: The action compatible with the core.
         """
+        if (self.__core.decision_mode == "charging" and
+                not self.__output_converter):
+            # TODO: skip if RL
+            return self.__transform_a_charging_duration(agent_action)
         if self.__strategy_configuration == 0:
             # both routing and sequencing direct actions
             return self.__transform_a_direct_action_run(agent_action)
@@ -379,7 +383,20 @@ class SlapEnv(gym.Env):
             return agent_action
 
     def __transform_a_fixed_storage_fixed_retrieval(self, agent_action):
-        # config 4
+        if self.__core.decision_mode == "charging":
+            if isinstance(self.__core.inpt.params.charging_thresholds, list):
+                threshold = self.env_input.params.charging_thresholds[
+                    agent_action]
+            else:
+                # threshold = self.__denormalize_action(agent_action[0])
+                threshold = agent_action[0]
+            agv_id = self.core_env.previous_event.agv_id
+            agvm = self.core_env.state.agv_manager
+            agv = self.core_env.state.agv_manager.agv_index[agv_id]
+            charge_to_full = threshold - agv.battery
+            charging_duration = charge_to_full / agvm.charging_rate
+            # charging_duration = threshold / agvm.charging_rate
+            return charging_duration
         if self.__core.decision_mode == "delivery":
             return self.__storage_strategies[0].get_action(self.__core.state)
         else:
@@ -412,6 +429,11 @@ class SlapEnv(gym.Env):
             return self.__storage_strategies[agent_action].get_action(self.__core.state)
         else:
             return self.__retrieval_strategies[agent_action].get_action(self.__core.state)
+
+    def __transform_a_charging_duration(self, agent_action):
+        # config 8
+        if self.__core.decision_mode == "charging":
+            return agent_action
 
     def render(self, mode='dummy'):
         raise NotImplementedError

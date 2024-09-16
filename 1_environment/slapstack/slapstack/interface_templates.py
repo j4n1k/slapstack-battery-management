@@ -38,6 +38,17 @@ class StorageStrategy:
         pass
 
 
+class ChargingStrategy:
+    def __int__(self):
+        pass
+
+    def get_action(self, state: 'State', agv_id: int) -> int:
+        pass
+
+    def update(self, action: Tuple[int, int, int]):
+        pass
+
+
 class OutputConverter:
     def modify_state(self, state: 'State') -> np.ndarray:
         pass

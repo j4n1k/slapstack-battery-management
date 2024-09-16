@@ -2,6 +2,7 @@ from typing import List
 
 from experiment_commons import run_episode
 from slapstack.interface_templates import SimulationParameters
+from slapstack_controls.charging_policies import FixedChargePolicy
 from slapstack_controls.storage_policies import (ClassBasedPopularity,
                                                  ClassBasedCycleTime,
                                                  ClosestOpenLocation)
@@ -69,6 +70,7 @@ if __name__ == '__main__':
     for i in range(0, n_strategies):
         run_episode(simulation_parameters=params,
                     storage_strategy=storage_policies[i],
+                    charging_strategy=FixedChargePolicy(70),
                     print_freq=1000, warm_start=True,
                     log_dir='./result_data_wepa/')
 

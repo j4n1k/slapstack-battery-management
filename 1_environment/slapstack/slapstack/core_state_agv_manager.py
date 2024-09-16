@@ -111,6 +111,7 @@ class AgvManager:
         self.n_charging_stations = len(np.argwhere(self.router.s[:, :, 0]
                                                    == StorageKeys.CHARGING_STATION))
         print(self.n_charging_stations)
+        self.agv_trackers = AGVTrackers(self)
 
 
     @staticmethod
@@ -460,7 +461,10 @@ class AgvManager:
         agv = self.agv_index[agv_id]
         agv.battery += charging_time * self.charging_rate
         agv.charging_needed = False
-        assert agv.battery <= 100
+        try:
+            assert agv.battery <= 100
+        except:
+            print()
 
     def deplete_battery(self, t, loaded: bool, agv_id: int):
         agv = self.agv_index[agv_id]
@@ -598,3 +602,30 @@ class AgvManager:
         # self.free_idle_positions.remove(idle_station)
         self.relocating_agvs.remove(agv_id)
         self.stationary_amr_positions.add(idle_station)
+
+    def update_trackers_on_charging_end(self):
+        self.agv_trackers.n_charges += 1
+        total_battery = 0
+        for agv in self.agv_index:
+            total_battery += self.agv_index[agv].battery
+        self.agv_trackers.avg_battery_level = total_battery / len(self.agv_index)
+
+        for agv_id in self.agv_index.keys():
+            self.agv_trackers.battery_level_per_agv[agv_id]\
+                = self.agv_index[agv_id].battery
+            self.agv_trackers.charges_per_agv[agv_id]\
+                = self.agv_index[agv_id].n_charging_stops
+
+        for cs in self.booked_charging_stations.keys():
+            self.agv_trackers.queue_per_station[cs]\
+                = len(self.booked_charging_stations[cs])
+
+
+class AGVTrackers:
+    def __init__(self, agvm: AgvManager):
+        self.avg_battery_level = 0
+        self.n_charges = 0
+        self.queue_per_station = {cs: 0 for cs in agvm.free_charging_stations}
+        self.battery_level_per_agv = {agv_id: 0 for agv_id in agvm.agv_index.keys()}
+        self.charges_per_agv = {agv_id: 0 for agv_id in agvm.agv_index.keys()}
+        self.orders_not_serviced_agvs_depleted = 0

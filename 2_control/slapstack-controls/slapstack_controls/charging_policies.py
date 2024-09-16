@@ -13,8 +13,8 @@ from stable_baselines3 import DQN, SAC
 from slapstack.core import State, SlapCore
 from slapstack.core_events import Order, Retrieval
 from slapstack.core_state_agv_manager import AGV
-from slapstack.core_state_location_manager import LocationManager, \
-    LocationTrackers
+# from slapstack.core_state_location_manager import LocationManager, \
+#     LocationTrackers
 from slapstack.core_state_zone_manager import ZoneManager
 from slapstack.helpers import print_3d_np, AccessDirection, ravel, unravel
 from slapstack.interface_templates import ChargingStrategy
