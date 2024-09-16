@@ -5,7 +5,7 @@ import gym
 import numpy as np
 from slapstack.core_events import (Retrieval, RetrievalFirstLeg,
                                    DeliverySecondLeg, Travel, Delivery, Event,
-                                   DeliveryFirstLeg, RetrievalSecondLeg)
+                                   DeliveryFirstLeg, RetrievalSecondLeg, Charging)
 from slapstack.core_state import State
 from slapstack.core_state_agv_manager import AGV
 from slapstack.core_state_lane_manager import LaneManager
@@ -364,7 +364,7 @@ class SlapCore(gym.Env):
         self.print("given action: " + str(action))
 
     # @profile
-    def step(self, action: int) -> Tuple[State, bool]:
+    def step(self, raw_action: int) -> Tuple[State, bool]:
         """key function that takes an action from an agent, randomly, or from
         a storage or retrieval strategy. first action is converted from an int
         to a 3D tuple that fits the warehouse shape, then depending on if the
@@ -372,16 +372,21 @@ class SlapCore(gym.Env):
         DeliverySecondLeg or RetrievalFirstLeg event, respectively. Updates
         event data structures, and executes step_no_action(). If the simulation
         is done afterwards, it can be ended here."""
-        action = unravel(action, self.inpt.params.shape)
+        action = unravel(raw_action, self.inpt.params.shape)
         self.state.n_steps += 1
         self.__print_debug_info(tuple(action))
-        travel_event = None
+        event = None
         if self.decision_mode == "delivery":
-            travel_event = self.__create_event_on_delivery(action)
+            event = self.__create_event_on_delivery(action)
         elif self.decision_mode == "retrieval":
-            travel_event = self.__create_event_on_retrieval(action)
-        self.state.add_travel_event(travel_event)
-        self.events.add_travel_event(travel_event, self.state)
+            event = self.__create_event_on_retrieval(action)
+        elif self.decision_mode == "charging":
+            event = self.__create_event_on_cs_arrival(raw_action)
+        if isinstance(event, Travel):
+            self.state.add_travel_event(event)
+            self.events.add_travel_event(event)
+        else:
+            self.events.add_future_event(event)
         self.logger.log_state()
         done_prematurely = self.step_no_action()
         return self.__has_ended(done_prematurely)
@@ -489,6 +494,23 @@ class SlapCore(gym.Env):
                 servicing_delivery_order=[delivery_order]
                 if delivery_order is not None else [])
         return travel_event
+
+    def __create_event_on_cs_arrival(
+            self, action: int):
+        prev_e = self.previous_event
+        # TODO Revisit EventType und Events
+        # delivery_order: Union[Delivery, None] = None
+        time_done = self.state.time + action
+        charging_event = Charging(time_done, charging_event_travel=prev_e,
+                                  charging_duration=action)
+        booked_cs = self.state.agv_manager.booked_charging_stations
+        queue = self.state.agv_manager.queued_charging_events[prev_e.last_node]
+        if prev_e.last_node in booked_cs:
+            if len(booked_cs[prev_e.last_node]) > 1:
+                queue.append(charging_event)
+                return None
+            else:
+                return charging_event
 
     def update_prev_event_and_curr_order(
             self, this_event: Event, queued_retrieval_order_to_add: Retrieval):
@@ -735,19 +757,17 @@ class SlapCore(gym.Env):
             if order_type == "retrieval":
                 self.events.add_future_event(
                     Retrieval(arrival_time, sku, order_number,
-                              self.verbose, source_sink, batch, period),
-                    self.state)
+                              self.verbose, source_sink, batch, period))
             elif order_type == "delivery":
                 if len(order) == 6:
                     self.events.add_future_event(
                         Delivery(arrival_time, sku, order_number,
-                                 self.verbose, source_sink, batch, period),
-                    self.state)
+                                 self.verbose, source_sink, batch, period))
                 elif len(order) == 7:
                     self.events.add_future_event(
                         Delivery(arrival_time, sku, order_number,
                                  self.verbose, source_sink, batch, period,
-                                 destination), self.state)
+                                 destination))
             order_number += 1
         self.events.order_times = [i.time for i in self.events.running]
         self.print("")

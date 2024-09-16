@@ -1032,7 +1032,9 @@ class EventManager:
     def n_queued_delivery_orders(self, n_orders):
         self.__n_queued_delivery_orders = n_orders
 
-    def add_future_event(self, event: Event, state):
+    def add_future_event(self, event: Event):
+        if event is None:
+            return
         self.__state_changed_retrieval = True
         self.__state_changed_delivery = True
         heap.heappush(self.running, event)
@@ -1045,7 +1047,7 @@ class EventManager:
         be added to self.events.current_travel.
         """
         if event_queueing_info.event_to_add:
-            self.add_future_event(event_queueing_info.event_to_add, state)
+            self.add_future_event(event_queueing_info.event_to_add)
         if event_queueing_info.travel_event_to_add:
             self.__state_changed_retrieval = True
             self.__state_changed_delivery = True
@@ -1067,6 +1069,12 @@ class EventManager:
                          f"{event_queueing_info.queued_delivery_order_to_add}")
             self.__queue_delivery_order(
                 event_queueing_info.queued_delivery_order_to_add)
+        if event_queueing_info.queued_charging_event_to_add:
+            self.__print(f"added charging event to queue: "
+                         f"{event_queueing_info.queued_charging_event_to_add}")
+            self.__push_charging_event(
+                event_queueing_info.queued_charging_event_to_add)
+            assert len(self.running) > 0
 
     def __queue_delivery_order(self, order: Delivery):
         self.__state_changed_delivery = True
@@ -1086,6 +1094,9 @@ class EventManager:
             self.queued_retrieval_orders[sku].append(order)
         else:
             self.queued_retrieval_orders[sku] = deque([order])
+
+    def __push_charging_event(self, event: Charging):
+        heap.heappush(self.running, event)
 
     def pop_future_event(self):
         self.__state_changed_retrieval = True
@@ -1140,7 +1151,7 @@ class EventManager:
         self.__state_changed_delivery = True
         return next_event
 
-    def add_travel_event(self, event: Travel, state):
+    def add_travel_event(self, event: Travel):
         """
         Adds the travel event to both the future events queue and the running
         travel events queue.
@@ -1150,7 +1161,7 @@ class EventManager:
         :return: None.
         """
         self.current_travel.add(event)
-        self.add_future_event(event, state)
+        self.add_future_event(event)
 
     def find_travel_event(
             self, agv_id: int, event_type: Type[Travel]
