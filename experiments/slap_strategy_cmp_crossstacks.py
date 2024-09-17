@@ -23,7 +23,7 @@ def get_storage_strategies():
 
 
 params = SimulationParameters(
-    use_case="crossstacks",
+    use_case="crossstacks_bm",
     use_case_n_partitions=1,
     use_case_partition_to_use=0,
     n_agvs=3,
@@ -41,7 +41,8 @@ params = SimulationParameters(
     n_levels=1,
     door_to_door=True,
     # update_partial_paths=False,
-    agv_forks=1
+    agv_forks=1,
+    charging_thresholds=[40, 50, 60, 70, 80]
 )
 
 if __name__ == '__main__':

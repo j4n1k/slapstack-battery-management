@@ -292,6 +292,7 @@ class SimulationParameters:
         self.desired_fill_level = None
         self.shape = use_case.layout.shape + (use_case.n_levels,)
 
+
 class UseCasePartition:
     """order = (order_type, sku, time, entrance/exit id, production
     batch/shipping id)"""
