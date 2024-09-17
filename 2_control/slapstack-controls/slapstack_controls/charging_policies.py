@@ -24,9 +24,24 @@ class ChargingPolicy(ChargingStrategy):
     def __init__(self, name, init=False):
         super().__init__()
         self.name = name
+        self.type = "charging"
 
     def get_action(self, state: State, agv_id=None):
         raise NotImplementedError
+
+
+class LowTHChargePolicy(ChargingStrategy):
+    def __init__(self, lower_threshold: float):
+        super().__init__()
+        self.lower_threshold = lower_threshold
+        self.name = "lowth"
+
+    def get_action(self, state: 'State', agv_id: int) -> int:
+        go_charging = state.agv_manager.charge_needed(False, agv_id)
+        if go_charging:
+            return 1
+        else:
+            return 0
 
 
 class FixedChargePolicy(ChargingPolicy):

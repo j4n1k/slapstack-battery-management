@@ -261,7 +261,9 @@ def _init_run_loop(simulation_parameters, storage_strategy, log_dir):
 
 def run_episode(simulation_parameters: SimulationParameters,
                 storage_strategy: StoragePolicy,
-                charging_strategy: ChargingPolicy, print_freq=0,
+                charging_strategy: ChargingPolicy,
+                charging_check_strategy,
+                print_freq=0,
                 warm_start=False, log_dir='./result_data/',
                 stop_condition=False, pickle_at_decisions=np.infty):
     pickle_path = (f'end_env_{storage_strategy.name}_'
@@ -278,6 +280,10 @@ def run_episode(simulation_parameters: SimulationParameters,
             prev_event = env.core_env.previous_event
             action = charging_strategy.get_action(loop_controls.state,
                                                   agv_id=prev_event.agv_id)
+        elif env.core_env.decision_mode == "charging_check":
+            prev_event = env.core_env.previous_event
+            action = charging_check_strategy.get_action(loop_controls.state,
+                                                  agv_id=prev_event.agv.id)
         elif warm_start and len(loop_controls.trackers.finished_orders) < 1000:
             action = ClosestOpenLocation().get_action(loop_controls.state)
         elif (isinstance(storage_strategy, ClosestToNextRetrieval)

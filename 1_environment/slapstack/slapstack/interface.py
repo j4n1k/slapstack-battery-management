@@ -37,6 +37,7 @@ class SlapEnv(gym.Env):
         self.__strategy_configuration = -1
         self.__storage_strategies = None
         self.__retrieval_strategies = None
+        self.__charging_strategies = None
         self.__setup_strategies(action_converters
                                 if action_converters is not None else [])
         self.action_space = None
@@ -70,16 +71,19 @@ class SlapEnv(gym.Env):
         :param selectable_strategies: The list of strategies.
         :return: None
         """
-        sto_opt, ret_opt = [], []
+        sto_opt, ret_opt, ch_opt = [], [], []
         for strategy in selectable_strategies:
             if strategy.type == 'delivery':
                 sto_opt.append(strategy)
             elif strategy.type == 'retrieval':
                 ret_opt.append(strategy)
+            elif strategy.type == 'charging':
+                ch_opt.append(strategy)
             else:
                 raise Exception("no target mode set")
         self.__storage_strategies = np.array(sto_opt)
         self.__retrieval_strategies = np.array(ret_opt)
+        self.__charging_strategies = np.array(ch_opt)
         self.__setup_strategy_config()
 
     def step(self, action: Union[int, np.ndarray]):
@@ -193,8 +197,7 @@ class SlapEnv(gym.Env):
 
     def __skip_fixed_decisions(self, done):
         state_repr, reward = None, 0
-        while (self.autoplay() and not done and
-               self.__core.decision_mode != "charging"):
+        while self.autoplay() and not done:
             if self.__core.state.current_order == "delivery":
                 action = self.__storage_strategies[0].get_action(
                     self.__core.state)
@@ -218,8 +221,20 @@ class SlapEnv(gym.Env):
                                                                           self.__core.decision_mode)
                 else:
                     state_repr = state
-            else:
+            elif self.__core.state.current_order == "charging_check":
                 action = self.core_env.state.agv_manager.charge_needed(False, self.core_env.previous_event.agv.id)
+                state, done = self.__core.step(action)
+                if self.__output_converter:
+                    state_repr = self.__output_converter.modify_state(self.__core.state)
+                    if not done:
+                        legal_actions = self.__core.legal_actions
+                        reward = self.__output_converter.calculate_reward(self.__core.state, action, legal_actions,
+                                                                          self.__core.decision_mode)
+                else:
+                    state_repr = state
+            elif self.__core.state.current_order == "charging":
+                action = self.__charging_strategies[0].get_action(self.__core.state,
+                                                                  self.core_env.previous_event.agv.id)
                 state, done = self.__core.step(action)
                 if self.__output_converter:
                     state_repr = self.__output_converter.modify_state(self.__core.state)
@@ -268,6 +283,7 @@ class SlapEnv(gym.Env):
 
         n_ss = self.__storage_strategies.shape[0]
         n_rs = self.__retrieval_strategies.shape[0]
+        n_cs = self.__charging_strategies.shape[0]
         if n_ss == 0 and n_rs == 0: # direct actions only
             self.__strategy_configuration = 0
         elif n_ss == 0 and n_rs == 1:
@@ -284,6 +300,8 @@ class SlapEnv(gym.Env):
             self.__strategy_configuration = 6
         elif n_ss > 1 and n_rs == 1:
             self.__strategy_configuration = 7
+        elif n_ss == 1 and n_rs == 1 and n_cs == 1:
+            self.__strategy_configuration = 9
         else:  # n_ss > 1 and n_rs > 1:
             self.__strategy_configuration = 8
 
@@ -356,8 +374,9 @@ class SlapEnv(gym.Env):
         :param agent_action: The action as chosen by the agent.
         :return: The action compatible with the core.
         """
-        if (self.__core.decision_mode == "charging" and
-                not self.__output_converter):
+        if ((self.__core.decision_mode == "charging" and
+            not self.__output_converter) or
+                (self.__core.decision_mode == "charging_check" and not self.__output_converter)):
             # TODO: skip if RL
             return self.__transform_a_charging_duration(agent_action)
         if self.__strategy_configuration == 0:
@@ -467,7 +486,7 @@ class SlapEnv(gym.Env):
 
     def __transform_a_charging_duration(self, agent_action):
         # config 8
-        if self.__core.decision_mode == "charging":
+        if self.__core.decision_mode == "charging" or self.__core.decision_mode == "charging_check":
             return agent_action
 
     def render(self, mode='dummy'):

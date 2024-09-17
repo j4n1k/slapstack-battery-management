@@ -39,8 +39,8 @@ class StorageStrategy:
 
 
 class ChargingStrategy:
-    def __int__(self):
-        pass
+    def __int__(self, strategy_type):
+        self.type = strategy_type
 
     def get_action(self, state: 'State', agv_id: int) -> int:
         pass

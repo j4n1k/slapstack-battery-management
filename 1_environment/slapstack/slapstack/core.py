@@ -726,6 +726,8 @@ class SlapCore(gym.Env):
             return legal_actions
         elif self.decision_mode == "charging_check":
             self.state.set_current_order(self.decision_mode)
+        elif self.decision_mode == "charging":
+            self.state.set_current_order(self.decision_mode)
 
     def get_legal_retrieval_actions(self) -> List[int]:
         """returns legal actions that are all of the storage locations with
