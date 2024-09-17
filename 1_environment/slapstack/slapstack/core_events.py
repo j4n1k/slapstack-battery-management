@@ -320,7 +320,7 @@ class Travel(Event):
             cs = state.agv_manager.get_charging_station(agv.position, core)
         ChargingFirstLeg.charging_nr += 1
         dummy_charging_order = Order(
-            -np.infty, -999, ChargingFirstLeg.charging_nr, -999, False)
+            -np.infty, -999, ChargingFirstLeg.charging_nr * -1, -999, False)
         travel_event = ChargingFirstLeg(
             state=state,
             start_point=self.last_node,
@@ -679,12 +679,14 @@ class RetrievalSecondLeg(Travel):
             state.agv_manager.agv_index.get(self.agv_id).dcc_retrieval_order\
                 = []
             state.agv_manager.release_agv(last_node, state.time, self.agv_id)
-            self.check_charging = True
-            if super()._check_battery(state):
-                travel = super()._get_charging_travel(state, core)
-            else:
-                travel = Relocation(state, self.last_node, self.agv_id)
-            return EventHandleInfo(False, travel, travel, None, None)
+            # if super()._check_battery(state):
+            #     travel = super()._get_charging_travel(state, core)
+            # else:
+            #     travel = Relocation(state, self.last_node, self.agv_id)
+            # state.add_travel_event(travel)
+            # return EventHandleInfo(False, travel, travel, None, None)
+            event = GoChargingCheck(self.time, state, self.last_node, self.agv_id, core)
+            return EventHandleInfo(False, event, None, None, None)
 
     def __str__(self):
         return super().__str__()
@@ -846,12 +848,14 @@ class DeliverySecondLeg(Travel):
                 agv.dcc_retrieval_order = []
                 state.agv_manager.release_agv(
                     pallet_position[:-1], self.time, self.agv_id)
-                self.check_charging = True
-                if super()._check_battery(state):
-                    travel = super()._get_charging_travel(state, core)
-                else:
-                    travel = Relocation(state, self.last_node, self.agv_id)
-                return EventHandleInfo(False, travel, travel, None, None)
+                # if super()._check_battery(state):
+                #     travel = super()._get_charging_travel(state, core)
+                # else:
+                #     travel = Relocation(state, self.last_node, self.agv_id)
+                # state.add_travel_event(travel)
+                # return EventHandleInfo(False, travel, travel, None, None)
+                event = GoChargingCheck(self.time, state, self.last_node, self.agv_id, core)
+                return EventHandleInfo(False, event, None, None, None)
             else:
                 actions = []
                 pending_ret_orders = []
@@ -946,19 +950,22 @@ class ChargingFirstLeg(Travel):
         super().__init__(state, start_point, end_point, travel_type,
                          level, orders, order,
                          TravelEventKeys.CHARGING_FIRST_LEG, agv_id)
-        locs = state.agv_manager.get_agv_locations()
-        # assert start_point in locs.keys()
-        idx = 0
-        target_idx = None
-        for agv in locs[start_point]:
-            if agv.id == agv_id:
-                target_idx = idx
-            else:
-                idx += 1
-        # end_pos = state.agv_manager.get_close_idle_position(start_point)
-        self.agv: AGV = state.agv_manager.book_agv(
-            start_point, state.time, target_idx,
-            self.travel_type, core.events)
+        if state.agv_manager.agv_index[agv_id].free:
+            locs = state.agv_manager.get_agv_locations()
+            # assert start_point in locs.keys()
+            idx = 0
+            target_idx = None
+            for agv in locs[start_point]:
+                if agv.id == agv_id:
+                    target_idx = idx
+                else:
+                    idx += 1
+            # end_pos = state.agv_manager.get_close_idle_position(start_point)
+            self.agv: AGV = state.agv_manager.book_agv(
+                start_point, state.time, target_idx,
+                self.travel_type, core.events)
+        else:
+            self.agv = state.agv_manager.agv_index[agv_id]
 
         assert self.agv.free == False
         assert self.agv.id == agv_id
@@ -966,7 +973,10 @@ class ChargingFirstLeg(Travel):
     def handle(self, state: 'State', core=None):
         super().handle(state)
         self.charging = True
-        state.remove_travel_event(self.order.order_number)
+        try:
+            state.remove_travel_event(self.order.order_number)
+        except KeyError:
+            print()
         state.agv_manager.update_v_matrix(self.first_node, self.last_node, True)
         state.remove_route(self.route.get_indices())
         assert self.last_node in np.argwhere(state.agv_manager.router.s[
@@ -993,7 +1003,7 @@ class Charging(Event):
         super().handle(state)
         agv = state.agv_manager.agv_index[self.agv_id]
         agv.n_charging_stops += 1
-        assert agv.charging_needed
+        # assert agv.charging_needed
         # TODO check KPI evt. Fallunterschiedung KPI charging nicht travel release
 
         state.agv_manager.release_agv(
@@ -1021,7 +1031,7 @@ class Charging(Event):
 
 
 class GoChargingCheck(Event):
-    def __init__(self, time: int, state: 'State', start_point: Tuple[int, int],
+    def __init__(self, time: float, state: 'State', start_point: Tuple[int, int],
                  agv_id: int, core):
         super().__init__(time=time, verbose=False)
         locs = state.agv_manager.get_agv_locations()
@@ -1038,6 +1048,7 @@ class GoChargingCheck(Event):
 
         assert self.agv.free == False
         assert self.agv.id == agv_id
+        self.last_node = start_point
 
     def handle(self, state: 'State', core=None):
         super().handle(state)

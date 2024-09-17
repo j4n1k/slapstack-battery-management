@@ -528,12 +528,14 @@ class SlapCore(gym.Env):
         prev_e = self.previous_event
         travel_event = None
         if action == 1:
-            agv: AGV = self.state.agv_manager.agv_index[prev_e.agv_id]
+            #agv: AGV = self.state.agv_manager.agv_index[prev_e.agv_id]
+            agv = prev_e.agv
             agv.scheduled_charging = False
             cs = self.state.agv_manager.get_charging_station(agv.position, None)
             ChargingFirstLeg.charging_nr += 1
             dummy_charging_order = Order(
-                -np.infty, -999, ChargingFirstLeg.charging_nr, -999, False)
+                -np.infty, -999, ChargingFirstLeg.charging_nr * -1, -999, False)
+            # assert ChargingFirstLeg.charging_nr == dummy_charging_order.order_number
             travel_event = ChargingFirstLeg(
                 state=self.state,
                 start_point=prev_e.last_node,
@@ -543,10 +545,12 @@ class SlapCore(gym.Env):
                 # source=0,
                 orders=None,
                 order=dummy_charging_order,
-                agv_id=prev_e.agv_id,
+                agv_id=agv.id,
                 core=self.events)
         elif action == 0:
-            travel_event = Relocation(self.state, prev_e.last_node, prev_e.agv_id)
+            agv = prev_e.agv
+            self.state.agv_manager.release_agv(prev_e.last_node, self.state.time, agv.id)
+            travel_event = Relocation(self.state, prev_e.last_node, agv.id)
         assert travel_event
         return travel_event
 
@@ -720,6 +724,8 @@ class SlapCore(gym.Env):
             legal_actions = self.get_legal_retrieval_actions()
             assert legal_actions
             return legal_actions
+        elif self.decision_mode == "charging_check":
+            self.state.set_current_order(self.decision_mode)
 
     def get_legal_retrieval_actions(self) -> List[int]:
         """returns legal actions that are all of the storage locations with

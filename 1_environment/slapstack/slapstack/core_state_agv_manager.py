@@ -390,7 +390,8 @@ class AgvManager:
             # if (not agv.servicing_order_type == "charging_first_leg" or
             #         (self.charge_in_break_started and agv.scheduled_charging)):
                 # if not self.charge_needed(False, agv.id):
-            if not agv.servicing_order_type == "charging_first_leg":
+            if (not agv.servicing_order_type == "charging_first_leg" and
+                    not agv.servicing_order_type == "charging_check"):
                 # if not self.charge_needed(False, agv.id):
                 self.booked_idle_positions.remove(agv_pos)
                 self.free_idle_positions.add(agv_pos)
@@ -456,6 +457,8 @@ class AgvManager:
             # charging required, travel can not be completed
             agv.charging_needed = True
             return True
+        else:
+            return False
 
     def charge_battery(self, charging_time: int, agv_id: int):
         agv = self.agv_index[agv_id]

@@ -423,7 +423,11 @@ class State:
         """adds a Travel event to self.travel_events"""
         if travel_event:
             t = travel_event
-            order_type, leg, _ = t.travel_type.split('_')
+            if '_' in t.travel_type:
+                order_type, leg, _ = t.travel_type.split('_')
+            else:
+                order_type = t.travel_type
+                leg = "first"
             parameters = {"SKU": int(t.order.SKU),
                           "type": order_type,
                           "leg": leg,

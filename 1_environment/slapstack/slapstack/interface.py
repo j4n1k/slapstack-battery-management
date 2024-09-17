@@ -207,8 +207,19 @@ class SlapEnv(gym.Env):
                                                                           self.__core.decision_mode)
                 else:
                     state_repr = state
-            else:  # if current order is a retrieval order
+            elif self.__core.state.current_order == "retrieval":  # if current order is a retrieval order
                 action = self.__retrieval_strategies[0].get_action(self.__core.state)
+                state, done = self.__core.step(action)
+                if self.__output_converter:
+                    state_repr = self.__output_converter.modify_state(self.__core.state)
+                    if not done:
+                        legal_actions = self.__core.legal_actions
+                        reward = self.__output_converter.calculate_reward(self.__core.state, action, legal_actions,
+                                                                          self.__core.decision_mode)
+                else:
+                    state_repr = state
+            else:
+                action = self.core_env.state.agv_manager.charge_needed(False, self.core_env.previous_event.agv.id)
                 state, done = self.__core.step(action)
                 if self.__output_converter:
                     state_repr = self.__output_converter.modify_state(self.__core.state)
@@ -232,6 +243,8 @@ class SlapEnv(gym.Env):
         return ((self.__core.decision_mode == "delivery" and
                  self.__strategy_configuration in {3, 4, 5}) or
                 (self.__core.decision_mode == "retrieval" and
+                 self.__strategy_configuration in {1, 4, 7}) or
+                (self.__core.decision_mode == "charging_check" and
                  self.__strategy_configuration in {1, 4, 7}))
 
     def __setup_strategy_config(self):

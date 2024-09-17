@@ -50,7 +50,7 @@ if __name__ == '__main__':
     storage_policies = get_storage_strategies()
     n_strategies = len(storage_policies)
     constraints_breached = True
-    n_agv = 7
+    n_agv = 20
     while constraints_breached:
         n_agv += 1
         params.n_agvs = n_agv
