@@ -297,6 +297,7 @@ class Travel(Event):
         self.intercepted = False
         self.charging_required = False
         self.charging = False
+        self.check_charging = False
 
     def set_intercept(self, intercepted: bool):
         self.intercepted = intercepted
@@ -678,6 +679,7 @@ class RetrievalSecondLeg(Travel):
             state.agv_manager.agv_index.get(self.agv_id).dcc_retrieval_order\
                 = []
             state.agv_manager.release_agv(last_node, state.time, self.agv_id)
+            self.check_charging = True
             if super()._check_battery(state):
                 travel = super()._get_charging_travel(state, core)
             else:
@@ -844,6 +846,7 @@ class DeliverySecondLeg(Travel):
                 agv.dcc_retrieval_order = []
                 state.agv_manager.release_agv(
                     pallet_position[:-1], self.time, self.agv_id)
+                self.check_charging = True
                 if super()._check_battery(state):
                     travel = super()._get_charging_travel(state, core)
                 else:
@@ -1015,6 +1018,31 @@ class Charging(Event):
         #assert charging_event
         return EventHandleInfo(False, travel, travel, None,
                                None, charging_event)
+
+
+class GoChargingCheck(Event):
+    def __init__(self, time: int, state: 'State', start_point: Tuple[int, int],
+                 agv_id: int, core):
+        super().__init__(time=time, verbose=False)
+        locs = state.agv_manager.get_agv_locations()
+        idx = 0
+        target_idx = None
+        for agv in locs[start_point]:
+            if agv.id == agv_id:
+                target_idx = idx
+            else:
+                idx += 1
+        self.agv: AGV = state.agv_manager.book_agv(
+            start_point, state.time, target_idx,
+            "charging_check", core.events)
+
+        assert self.agv.free == False
+        assert self.agv.id == agv_id
+
+    def handle(self, state: 'State', core=None):
+        super().handle(state)
+        return EventHandleInfo(True, None, None, None,
+                               None, None)
 
 
 class EventManager:

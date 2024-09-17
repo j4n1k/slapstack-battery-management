@@ -82,7 +82,7 @@ class SlapEnv(gym.Env):
         self.__retrieval_strategies = np.array(ret_opt)
         self.__setup_strategy_config()
 
-    def step(self, action: int):
+    def step(self, action: Union[int, np.ndarray]):
         # TODO: revisit and refactor this!!
         if self.__core.state.params.charging_thresholds:
             self.last_action_taken = action

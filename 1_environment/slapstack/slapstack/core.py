@@ -5,7 +5,8 @@ import gym
 import numpy as np
 from slapstack.core_events import (Retrieval, RetrievalFirstLeg,
                                    DeliverySecondLeg, Travel, Delivery, Event,
-                                   DeliveryFirstLeg, RetrievalSecondLeg, Charging, ChargingFirstLeg)
+                                   DeliveryFirstLeg, RetrievalSecondLeg, Charging, ChargingFirstLeg, Order, Relocation,
+                                   GoChargingCheck)
 from slapstack.core_state import State
 from slapstack.core_state_agv_manager import AGV
 from slapstack.core_state_lane_manager import LaneManager
@@ -390,6 +391,8 @@ class SlapCore(gym.Env):
             event = self.__create_event_on_retrieval(action)
         elif self.decision_mode == "charging":
             event = self.__create_event_on_cs_arrival(raw_action)
+        elif self.decision_mode == "charging_check":
+            event = self.__create_event_on_charging_check(raw_action)
         if isinstance(event, Travel):
             self.state.add_travel_event(event)
             self.events.add_travel_event(event)
@@ -520,6 +523,33 @@ class SlapCore(gym.Env):
             else:
                 return charging_event
 
+    def __create_event_on_charging_check(self,
+                                         action: int):
+        prev_e = self.previous_event
+        travel_event = None
+        if action == 1:
+            agv: AGV = self.state.agv_manager.agv_index[prev_e.agv_id]
+            agv.scheduled_charging = False
+            cs = self.state.agv_manager.get_charging_station(agv.position, None)
+            ChargingFirstLeg.charging_nr += 1
+            dummy_charging_order = Order(
+                -np.infty, -999, ChargingFirstLeg.charging_nr, -999, False)
+            travel_event = ChargingFirstLeg(
+                state=self.state,
+                start_point=prev_e.last_node,
+                end_point=(cs[0], cs[1]),
+                travel_type="charging_first_leg",
+                level=0,
+                # source=0,
+                orders=None,
+                order=dummy_charging_order,
+                agv_id=prev_e.agv_id,
+                core=self.events)
+        elif action == 0:
+            travel_event = Relocation(self.state, prev_e.last_node, prev_e.agv_id)
+        assert travel_event
+        return travel_event
+
     def update_prev_event_and_curr_order(
             self, this_event: Event, queued_retrieval_order_to_add: Retrieval):
         """
@@ -564,6 +594,9 @@ class SlapCore(gym.Env):
             assert this_event.charging
             self.decision_mode = "charging"
             self.state.decision_mode = "charging"
+            self.previous_event = this_event
+        if isinstance(this_event, GoChargingCheck):
+            self.decision_mode = "charging_check"
             self.previous_event = this_event
 
     def process_travel_events(self, elapsed_time: float):

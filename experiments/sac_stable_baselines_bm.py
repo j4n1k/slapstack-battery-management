@@ -84,10 +84,6 @@ def run_episode(simulation_parameters: SimulationParameters,
             state_repr = env.current_state_repr
             action, state = charging_strategy.predict(state_repr,
                                                       deterministic=True)
-            if denormalize:
-                action = denormalize_action(
-                                    action,
-                                    simulation_parameters.charging_thresholds)
         else:
             raise ValueError
         output, reward, loop_controls.done, info = env.step(action)
@@ -124,14 +120,7 @@ params = SimulationParameters(
     generate_orders=False,
     verbose=False,
     resetting=False,
-    initial_pallets_storage_strategy=ClassBasedPopularity(
-        retrieval_orders_only=False,
-        future_counts=True,
-        init=True,
-        # n_zones changes dynamically based on the slap strategy
-        # in get_episode_env
-        n_zones=2
-    ),
+    initial_pallets_storage_strategy=ClosestOpenLocation(),
     pure_lanes=True,
     n_levels=3,
     # https://logisticsinside.eu/speed-of-warehouse-trucks
