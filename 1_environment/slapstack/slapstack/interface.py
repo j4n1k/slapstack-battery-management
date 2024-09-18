@@ -256,11 +256,13 @@ class SlapEnv(gym.Env):
         when there is a fixed strategy (configs 1, 3, 4, 5 and 7)
          """
         return ((self.__core.decision_mode == "delivery" and
-                 self.__strategy_configuration in {3, 4, 5}) or
+                 self.__strategy_configuration in {3, 4, 5, 9}) or
                 (self.__core.decision_mode == "retrieval" and
-                 self.__strategy_configuration in {1, 4, 7}) or
+                 self.__strategy_configuration in {1, 4, 7, 9}) or
                 (self.__core.decision_mode == "charging_check" and
-                 self.__strategy_configuration in {1, 4, 7}))
+                 self.__strategy_configuration == 4) or
+                (self.__core.decision_mode == "charging" and
+                 self.__strategy_configuration == 9))
 
     def __setup_strategy_config(self):
         """
@@ -277,6 +279,7 @@ class SlapEnv(gym.Env):
          6: Selectable storage strategy and direct retrieval action
          7: Selectable storage strategy and fixed retrieval strategy
          8: Selectable storage and retrieval strategies
+         9: Fixed storage strategy, fixed retrieval strategy and fixed charging strategy run
 
         :return: None
         """
@@ -284,7 +287,9 @@ class SlapEnv(gym.Env):
         n_ss = self.__storage_strategies.shape[0]
         n_rs = self.__retrieval_strategies.shape[0]
         n_cs = self.__charging_strategies.shape[0]
-        if n_ss == 0 and n_rs == 0: # direct actions only
+        if n_ss == 1 and n_rs == 1 and n_cs == 1:
+            self.__strategy_configuration = 9
+        elif n_ss == 0 and n_rs == 0: # direct actions only
             self.__strategy_configuration = 0
         elif n_ss == 0 and n_rs == 1:
             self.__strategy_configuration = 1
@@ -300,8 +305,6 @@ class SlapEnv(gym.Env):
             self.__strategy_configuration = 6
         elif n_ss > 1 and n_rs == 1:
             self.__strategy_configuration = 7
-        elif n_ss == 1 and n_rs == 1 and n_cs == 1:
-            self.__strategy_configuration = 9
         else:  # n_ss > 1 and n_rs > 1:
             self.__strategy_configuration = 8
 
@@ -320,12 +323,13 @@ class SlapEnv(gym.Env):
 
         :return: None
         """
-        assert -1 < self.__strategy_configuration <= 8
+        assert -1 < self.__strategy_configuration <= 9
         n_rows = self.__core.inpt.params.n_rows
         n_columns = self.__core.inpt.params.n_columns
         n_levels = self.__core.inpt.params.n_levels
         n_ss = self.__storage_strategies.shape[0]
         n_rs = self.__retrieval_strategies.shape[0]
+        n_cs = self.__charging_strategies.shape[0]
         if self.__strategy_configuration in {0, 1, 3}:
             self.action_space = gym.spaces.Discrete(
                 n_rows * n_columns * n_levels)
@@ -346,6 +350,9 @@ class SlapEnv(gym.Env):
                 n_ss + n_rows * n_columns * n_levels)
         elif self.__strategy_configuration == 7:
             self.action_space = gym.spaces.Discrete(n_ss)
+        elif self.__strategy_configuration == 9:
+            # Go to charging -> binary decision
+            self.action_space = gym.spaces.Discrete(2)
         else:  # self.__strategy_configuration == 8:
             self.action_space = gym.spaces.Discrete(n_ss + n_rs)
 

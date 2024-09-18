@@ -56,7 +56,7 @@ if __name__ == '__main__':
         params.n_agvs = n_agv
         constraints_breached = run_episode(
             simulation_parameters=params,
-            storage_strategy=ClosestToDestination(),
+            storage_strategy=ClosestOpenLocation(very_greedy=False),
             charging_strategy=FixedChargePolicy(70),
             charging_check_strategy=LowTHChargePolicy(20),
             print_freq=1000,
