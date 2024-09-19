@@ -13,7 +13,7 @@ from slapstack.helpers import parallelize_heterogeneously
 from slapstack.interface_templates import SimulationParameters
 from slapstack_controls.storage_policies import (ClassBasedPopularity,
                                                  ClassBasedCycleTime,
-                                                 ClosestOpenLocation, BatchFIFO)
+                                                 ClosestOpenLocation, BatchFIFO, StoragePolicy)
 
 from slapstack_controls.charging_policies import (FixedChargePolicy,
                                                   RandomChargePolicy,
@@ -24,10 +24,19 @@ from stable_baselines3 import DQN
 
 
 def get_episode_env(sim_parameters: SimulationParameters,
+                    storage_strategy: StoragePolicy,
                     log_frequency: int, nr_zones: int,
                     logfile_name: str,
                     log_dir='./result_data/'):
     seeds = [56513]
+    if isinstance(sim_parameters.initial_pallets_storage_strategy,
+                  ClassBasedPopularity):
+        sim_parameters.initial_pallets_storage_strategy = ClassBasedPopularity(
+            retrieval_orders_only=False,
+            future_counts=True,
+            init=True,
+            n_zones=nr_zones
+        )
     return SlapEnv(
         sim_parameters, seeds,
         logger=ExperimentLogger(
@@ -36,21 +45,31 @@ def get_episode_env(sim_parameters: SimulationParameters,
             nr_zones=nr_zones,
             logfile_name=logfile_name),
         action_converters=[BatchFIFO(),
-                           ClosestOpenLocation(very_greedy=False)])
+                           storage_strategy])
 
 
 def _init_run_loop(simulation_parameters,
                    charging_strategy: Union[FixedChargePolicy|RandomChargePolicy],
+                   storage_strategy: StoragePolicy,
                    log_dir):
     th = None
     if isinstance(charging_strategy, FixedChargePolicy):
         th = charging_strategy.charging_threshold
     elif isinstance(charging_strategy, RandomChargePolicy):
         th = "random"
-    environment: SlapEnv = get_episode_env(
-        sim_parameters=simulation_parameters,
-        log_frequency=1000, nr_zones=3, log_dir=log_dir,
-        logfile_name=f'{charging_strategy.name}_th{th}')
+    if hasattr(storage_strategy, 'n_zones'):
+        environment: SlapEnv = get_episode_env(
+            sim_parameters=simulation_parameters,
+            storage_strategy=storage_strategy,
+            log_frequency=1000,
+            nr_zones=storage_strategy.n_zones, log_dir=log_dir,
+            logfile_name=f'{storage_strategy.name}_{charging_strategy.name}_th{th}')
+    else:
+        environment: SlapEnv = get_episode_env(
+            sim_parameters=simulation_parameters,
+            storage_strategy=storage_strategy,
+            log_frequency=1000, nr_zones=3, log_dir=log_dir,
+            logfile_name=f'{storage_strategy.name}_{charging_strategy.name}_th{th}')
     loop_controls = LoopControl(environment, steps_per_episode=120)
     # state.state_cache.perform_sanity_check()
     return environment, loop_controls
@@ -58,10 +77,11 @@ def _init_run_loop(simulation_parameters,
 
 def run_episode(simulation_parameters: SimulationParameters,
                 charging_strategy: Union[FixedChargePolicy|RandomChargePolicy],
+                storage_strategy: StoragePolicy,
                 print_freq=0, stop_condition=False,
                 log_dir='./result_data_charging/', steps_per_episode=None):
     env, loop_controls = _init_run_loop(
-        simulation_parameters, charging_strategy, log_dir)
+        simulation_parameters, charging_strategy, storage_strategy, log_dir)
     parametrization_failure = False
     start = time.time()
     while not loop_controls.done:
@@ -101,8 +121,8 @@ def get_charging_strategies():
 
     charging_strategies += [
         FixedChargePolicy(40),
-        # FixedChargePolicy(50),
-        # FixedChargePolicy(60),
+        FixedChargePolicy(50),
+        FixedChargePolicy(60),
         FixedChargePolicy(70),
         FixedChargePolicy(80),
         # FixedChargePolicy(90),
@@ -111,6 +131,40 @@ def get_charging_strategies():
     ]
 
     return charging_strategies
+
+
+def get_storage_strategies(nr_zones: List[int]):
+    storage_strategies = []
+    for n_zone in nr_zones:
+        storage_strategies += [
+            ClassBasedCycleTime(
+                n_orders=10000, recalculation_steps=1000, n_zones=n_zone),
+            ClassBasedPopularity(
+                retrieval_orders_only=False, n_zones=n_zone,
+                future_counts=True,
+                name=f'allOrdersPopularity_future_z{n_zone}'),
+            ClassBasedPopularity(
+                retrieval_orders_only=True, n_zones=n_zone,
+                future_counts=True,
+                name=f'retrievalPopularity_future_z{n_zone}'),
+            ClassBasedPopularity(
+                retrieval_orders_only=False, n_zones=n_zone,
+                future_counts=False, n_orders=10000, recalculation_steps=1000,
+                name=f'allOrdersPopularity_past_z{n_zone}'),
+            ClassBasedPopularity(
+                retrieval_orders_only=True, n_zones=n_zone,
+                future_counts=False, n_orders=10000, recalculation_steps=1000,
+                name=f'retrievalPopularity_past_z{n_zone}')
+        ]
+    storage_strategies += [
+        ClosestOpenLocation(very_greedy=True),
+        ClosestOpenLocation(very_greedy=False),
+    ]
+    return storage_strategies
+
+
+storage_policies = get_storage_strategies([2, 3, 5])
+charging_strategies = get_charging_strategies()
 
 params = SimulationParameters(
                 use_case="wepastacks_bm",
@@ -138,28 +192,37 @@ params = SimulationParameters(
                 charging_thresholds=[40, 50, 60, 70, 80],
             )
 
-charging_strategies = get_charging_strategies()
-
 if __name__ == '__main__':
-    n_strategies = len(charging_strategies)
-    for i in range(n_strategies):
-        print(f"Running sim with strategy: {charging_strategies[i].name}")
-        run_episode(
-                simulation_parameters=params,
-                charging_strategy=charging_strategies[i],
-                print_freq=1000,
-                steps_per_episode=120,
-                log_dir=
-                f'./result_data_charging/th_50'
-                )
-                #f'./result_data_charging/th_cmp/partition_{idx}/th_{th}'
-        parallelize_heterogeneously(
-            [run_episode] * n_strategies,
-            list(zip([params] * n_strategies,                    # params
-                     charging_strategies,                           # policy
-                     [0] * n_strategies,                         # print_freq
-                     [False] * n_strategies,                     # warm_start
-                     ['./result_data_charging'] * n_strategies,
-                     )))
-
+    n_charging_strategies = len(charging_strategies)
+    n_storage_strategies = len(storage_policies)
+    # for i in range(n_storage_strategies):
+    #     for j in range(n_charging_strategies):
+    #         print(f"Running sim with storage strategy: {storage_policies[i].name} "
+    #               f"and charging strategy: {charging_strategies[j].name}")
+    #         run_episode(
+    #                 simulation_parameters=params,
+    #                 charging_strategy=charging_strategies[j],
+    #                 storage_strategy=storage_policies[i],
+    #                 print_freq=100,
+    #                 steps_per_episode=120,
+    #                 log_dir=
+    #                 f'./result_data_charging_wepa'
+    #                 )
+    all_combinations = [
+        (params, charging_strategies[j], storage_policies[i], 100, 120, './result_data_charging_wepa')
+        for i in range(n_storage_strategies)
+        for j in range(n_charging_strategies)
+    ]
+    parallelize_heterogeneously(
+        [run_episode] * len(all_combinations),
+        all_combinations)
+    # parallelize_heterogeneously(
+    #     [run_episode] * n_strategies,
+    #     list(zip([params] * n_strategies,                    # params
+    #              charging_strategies,                           # policy
+    #              [0] * n_strategies,                         # print_freq
+    #              [False] * n_strategies,                     # warm_start
+    #              ['./result_data_charging_wepa'] * n_strategies,
+    #              )))
+    #
 

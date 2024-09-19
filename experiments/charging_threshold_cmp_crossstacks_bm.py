@@ -20,8 +20,6 @@ from slapstack_controls.charging_policies import (FixedChargePolicy,
                                                   FullChargePolicy,
                                                   ChargingPolicy)
 
-from stable_baselines3 import DQN
-
 
 def get_episode_env(sim_parameters: SimulationParameters,
                     log_frequency: int, nr_zones: int,
@@ -147,9 +145,8 @@ if __name__ == '__main__':
                 print_freq=1000,
                 steps_per_episode=120,
                 log_dir=
-                f'./charging'
+                f'./result_data_charging_crossstacks'
                 )
-                #f'./result_data_charging/th_cmp/partition_{idx}/th_{th}'
         # parallelize_heterogeneously(
         #     [run_episode] * n_strategies,
         #     list(zip([params] * n_strategies,                    # params
@@ -158,5 +155,3 @@ if __name__ == '__main__':
         #              [False] * n_strategies,                     # warm_start
         #              ['./result_data_charging'] * n_strategies,
         #              )))
-
-

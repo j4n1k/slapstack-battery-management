@@ -369,7 +369,7 @@ class AgvManager:
         if not self.free_agv_positions[agv_pos]:
             del self.free_agv_positions[agv_pos]
         if agv.id in self.relocating_agvs:
-            print()
+            # print()
             travel_e = event_manager.find_travel_event(agv.id, 'relocation')
             assert not travel_e.intercepted
             travel_e.set_intercept(True)

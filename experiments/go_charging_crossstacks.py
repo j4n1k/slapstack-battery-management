@@ -122,9 +122,8 @@ if __name__ == '__main__':
             print_freq=1000,
             steps_per_episode=120,
             log_dir=
-            f'./go_charging'
+            f'./result_data_gocharging_crossstacks'
             )
-            #f'./result_data_charging/th_cmp/partition_{idx}/th_{th}'
     # parallelize_heterogeneously(
     #     [run_episode] * n_strategies,
     #     list(zip([params] * n_strategies,                    # params

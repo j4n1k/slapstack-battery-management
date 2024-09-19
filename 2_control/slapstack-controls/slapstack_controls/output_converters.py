@@ -453,27 +453,38 @@ class FeatureConverterCharging(OutputConverter):
         # else:
         #     return np.zeros((self.n_stacks, len(self.feature_list)))
 
-    def calculate_reward(self, state: State,
+    def calculate_reward(self,
+                         state: State,
                          action: int,
                          legal_actions: list,
                          decision_mode: str) -> float:
-        if len(state.trackers.finished_orders) == 0 and self.n_observations != 0:
-            self.n_observations = 0
-            self.n_observations_prev = 0
-            self.n_orders_last_step = 0
-            self.n_delivery_orders_last_step = 0
-            self.n_retrieval_orders_last_step = 0
-            self.service_time_last_step = 0
-            self.time_last_step = 0
-            self.n_stacks = 3
-            self.feature_stack = np.zeros((0, 0))
+        # if state.agv_manager.agv_trackers.n_charges == 0:
+        #     self.n_observations = 0
+        #     self.n_observations_prev = 0
+        #     self.n_orders_last_step = 0
+        #     self.n_delivery_orders_last_step = 0
+        #     self.n_retrieval_orders_last_step = 0
+        #     self.service_time_last_step = 0
+        #     self.time_last_step = 0
+        #     self.n_stacks = 3
+        #     self.feature_stack = np.zeros((0, 0))
 
-        if decision_mode == "charging":
-            self.n_observations += 1
+        if decision_mode == "charging" or decision_mode == "charging_check":
             # Reward 0
             # return - state.trackers.average_service_time
 
             #Reward 1
+            if state.agv_manager.agv_trackers.n_charges == 0:
+                self.n_observations = 0
+                self.n_observations_prev = 0
+                self.n_orders_last_step = 0
+                self.n_delivery_orders_last_step = 0
+                self.n_retrieval_orders_last_step = 0
+                self.service_time_last_step = 0
+                self.time_last_step = 0
+                self.n_stacks = 3
+                self.feature_stack = np.zeros((0, 0))
+            self.n_observations += 1
             current_service_time = state.trackers.average_service_time
             delta_service_time = self.service_time_last_step - current_service_time
             self.service_time_last_step = current_service_time

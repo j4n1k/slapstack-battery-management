@@ -185,7 +185,7 @@ class SlapEnv(gym.Env):
             self.__env_input = Input(self.__env_input.params, seed)
         else:
             self.__env_input = Input(self.__env_input.params)
-        # self.__core = SlapCore(self.__env_input)
+        self.__core = SlapCore(self.__env_input, self.__core.logger)
         self.__core.reset()
         if self.autoplay():
             self.__skip_fixed_decisions(False)
@@ -246,7 +246,7 @@ class SlapEnv(gym.Env):
                     state_repr = state
             # if self.__output_converter:
             #     assert state_repr.shape == (900, )
-        if self.__core.decision_mode == "charging":
+        if self.__core.decision_mode == "charging" or self.__core.decision_mode == "charging_check":
             self.current_state_repr = state_repr
         return state_repr, reward, done
 
@@ -413,6 +413,9 @@ class SlapEnv(gym.Env):
         elif self.__strategy_configuration == 8:
             return self.__transform_a_selectable_storage_selectable_retrieval(
                 agent_action)
+        elif self.__strategy_configuration == 9:
+            return self.__transform_a_fixed_storage_fixed_retrieval(
+                agent_action)
 
         else:  # should not be possible at this point;
             raise Exception("no strategy configured")
@@ -460,6 +463,8 @@ class SlapEnv(gym.Env):
             return charging_duration
         if self.__core.decision_mode == "delivery":
             return self.__storage_strategies[0].get_action(self.__core.state)
+        elif self.__core.decision_mode == "charging_check":
+            return agent_action
         else:
             return self.__retrieval_strategies[0].get_action(self.__core.state)
 

@@ -330,8 +330,8 @@ class SlapCore(gym.Env):
         :return: True if the Event handled requires simulation control action
             (storage/retrieval decisions)
         """
-        if isinstance(next_event, Charging):
-            print()
+        # if isinstance(next_event, Charging):
+            # print()
         if next_event in self.events.current_travel:
             # noinspection PyTypeChecker
             next_event: Travel
@@ -535,7 +535,6 @@ class SlapCore(gym.Env):
             ChargingFirstLeg.charging_nr += 1
             dummy_charging_order = Order(
                 -np.infty, -999, ChargingFirstLeg.charging_nr * -1, -999, False)
-            # assert ChargingFirstLeg.charging_nr == dummy_charging_order.order_number
             travel_event = ChargingFirstLeg(
                 state=self.state,
                 start_point=prev_e.last_node,
