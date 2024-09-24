@@ -324,22 +324,36 @@ class PathKeys:
     STORAGE_TO_ACCESS = 9
 
 
-def ravel(position: Tuple[int, int, int], dims: Tuple[int, int, int]) -> int:
-    int_position = (position[0] * dims[1] * dims[2]
-                    + position[1] * dims[2] + position[2])
-    return int_position
+# def ravel(position: Tuple[int, int, int], dims: Tuple[int, int, int]) -> int:
+#     int_position = (position[0] * dims[1] * dims[2]
+#                     + position[1] * dims[2] + position[2])
+#     return int_position
+
+def ravel(
+        position: Tuple[int, int, int], dims: Tuple[int, int, int]
+) -> Tuple[int, int, int]:
+    return position
+    # int_position = (position[0] * dims[1] * dims[2]
+    #                 + position[1] * dims[2] + position[2])
+    # return int_position
 
 
 def ravel2(position: Tuple[int, int], shape: Tuple[int, int]) -> int:
     return position[0] * shape[1] + position[1]
 
 
-def unravel(position_enc: int, dims) -> Tuple[int, int, int]:
-    z: int = position_enc % dims[2]
-    y: int = (position_enc // dims[2]) % dims[1]
-    x: int = (position_enc // dims[2]) // dims[1]
-    return x, y, z
+# def unravel(position_enc: int, dims) -> Tuple[int, int, int]:
+#     z: int = position_enc % dims[2]
+#     y: int = (position_enc // dims[2]) % dims[1]
+#     x: int = (position_enc // dims[2]) // dims[1]
+#     return x, y, z
 
+def unravel(position_enc: Tuple[int, int, int], dims) -> Tuple[int, int, int]:
+    return position_enc
+    # z: int = position_enc % dims[2]
+    # y: int = (position_enc // dims[2]) % dims[1]
+    # x: int = (position_enc // dims[2]) // dims[1]
+    # return x, y, z
 
 def unravel2(int_encoding: int, shape: Tuple[int, int]) -> Tuple[int, int]:
     y: int = int_encoding % shape[1]

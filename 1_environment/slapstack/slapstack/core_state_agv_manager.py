@@ -456,9 +456,9 @@ class AgvManager:
         if agv.battery <= max_duration * self.consumption_rate_unloaded:
             # charging required, travel can not be completed
             agv.charging_needed = True
-            return True
+            return 1
         else:
-            return False
+            return 0
 
     def charge_battery(self, charging_time: int, agv_id: int):
         agv = self.agv_index[agv_id]

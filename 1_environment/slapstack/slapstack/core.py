@@ -383,7 +383,7 @@ class SlapCore(gym.Env):
         is done afterwards, it can be ended here."""
         action = unravel(raw_action, self.inpt.params.shape)
         self.state.n_steps += 1
-        self.__print_debug_info(tuple(action))
+        # self.__print_debug_info(tuple(action))
         event = None
         if self.decision_mode == "delivery":
             event = self.__create_event_on_delivery(action)

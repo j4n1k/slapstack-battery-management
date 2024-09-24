@@ -13,6 +13,7 @@ from slapstack.helpers import parallelize_heterogeneously
 from slapstack.interface_templates import SimulationParameters
 from slapstack_controls.storage_policies import (ClassBasedPopularity,
                                                  ClassBasedCycleTime,
+                                                 ConstantTimeGreedyPolicy,
                                                  ClosestOpenLocation, BatchFIFO)
 
 from slapstack_controls.charging_policies import (FixedChargePolicy,
@@ -101,10 +102,10 @@ def get_charging_strategies():
         # FixedChargePolicy(40),
         # FixedChargePolicy(50),
         # FixedChargePolicy(60),
-        FixedChargePolicy(70),
+        # FixedChargePolicy(70),
         # FixedChargePolicy(80),
         # FixedChargePolicy(90),
-        # FixedChargePolicy(100),
+        FixedChargePolicy(100),
         # RandomChargePolicy([40, 50, 60, 70, 80], 1)
     ]
 

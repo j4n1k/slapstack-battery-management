@@ -296,6 +296,7 @@ class FeatureConverter(OutputConverter):
 
 class FeatureConverterCharging(OutputConverter):
     def __init__(self, feature_list):
+        self.rewards = []
         self.feature_list = feature_list
         self.fill_level_per_lane = None
         self.max_queue_len = 0
@@ -314,6 +315,7 @@ class FeatureConverterCharging(OutputConverter):
         self.service_time_last_step = 0
         self.time_last_step = 0
         self.n_stacks = 3
+        self.running_avg = 0
         self.feature_stack = np.zeros((0, 0))
 
     def init_fill_level_per_lane(self, state: State):
@@ -337,6 +339,16 @@ class FeatureConverterCharging(OutputConverter):
     def f_get_n_charges(state: State):
         at = state.agv_manager.agv_trackers
         return np.average(list(at.charges_per_agv.values()))
+
+    @staticmethod
+    def f_get_curr_agv_battery(state: State):
+        agv_id = state.current_agv
+        if not agv_id:
+            return 0
+        else:
+            agvm = state.agv_manager
+            agv = agvm.agv_index[agv_id]
+            return agv.battery / 100
 
     @staticmethod
     def f_get_n_depleted_agvs(state: State):
@@ -453,6 +465,17 @@ class FeatureConverterCharging(OutputConverter):
         # else:
         #     return np.zeros((self.n_stacks, len(self.feature_list)))
 
+    def reset(self):
+        self.n_observations = 0
+        self.n_observations_prev = 0
+        self.n_orders_last_step = 0
+        self.n_delivery_orders_last_step = 0
+        self.n_retrieval_orders_last_step = 0
+        self.service_time_last_step = 0
+        self.time_last_step = 0
+        self.running_avg = 0
+        self.rewards = []
+
     def calculate_reward(self,
                          state: State,
                          action: int,
@@ -469,25 +492,29 @@ class FeatureConverterCharging(OutputConverter):
         #     self.n_stacks = 3
         #     self.feature_stack = np.zeros((0, 0))
 
-        if decision_mode == "charging" or decision_mode == "charging_check":
+        if decision_mode == "charging" and not isinstance(action, tuple):
             # Reward 0
             # return - state.trackers.average_service_time
 
             #Reward 1
-            if state.agv_manager.agv_trackers.n_charges == 0:
-                self.n_observations = 0
-                self.n_observations_prev = 0
-                self.n_orders_last_step = 0
-                self.n_delivery_orders_last_step = 0
-                self.n_retrieval_orders_last_step = 0
-                self.service_time_last_step = 0
-                self.time_last_step = 0
-                self.n_stacks = 3
-                self.feature_stack = np.zeros((0, 0))
+            # if state.agv_manager.agv_trackers.n_charges == 0:
+            #     self.n_observations = 0
+            #     self.n_observations_prev = 0
+            #     self.n_orders_last_step = 0
+            #     self.n_delivery_orders_last_step = 0
+            #     self.n_retrieval_orders_last_step = 0
+            #     self.service_time_last_step = 0
+            #     self.time_last_step = 0
+            #     self.n_stacks = 3
+            #     self.feature_stack = np.zeros((0, 0))
             self.n_observations += 1
             current_service_time = state.trackers.average_service_time
             delta_service_time = self.service_time_last_step - current_service_time
             self.service_time_last_step = current_service_time
+            self.running_avg += delta_service_time
+            state.running_avg = self.running_avg
+            self.rewards.append(delta_service_time)
+            state.rewards = self.rewards
             # self.n_orders_last_step = n_orders_now
             return delta_service_time
             #Reward 2

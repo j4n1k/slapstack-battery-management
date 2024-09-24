@@ -2,6 +2,7 @@ from collections import defaultdict
 from typing import Dict, Tuple, Set, Optional, List, cast, Union, TYPE_CHECKING
 
 import numpy as np
+from sortedcontainers import SortedSet
 
 from slapstack.core_state_lane_manager import LaneManager, Lane
 from slapstack.core_state_zone_manager import ZoneManager
@@ -301,7 +302,8 @@ class LocationManager:
 
         :return: A list of open locations in raveled form.
         """
-        open_locations = set({})
+        open_locations = SortedSet({}, lambda x: x[1])
+        # open_locations = set({})
         for _, lanes in self.lane_manager.lane_index.items():
             if lanes[AccessDirection.ABOVE]:
                 open_locations.add(ravel(

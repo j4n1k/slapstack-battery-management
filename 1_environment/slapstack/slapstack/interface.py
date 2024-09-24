@@ -190,6 +190,7 @@ class SlapEnv(gym.Env):
         if self.autoplay():
             self.__skip_fixed_decisions(False)
         if self.__output_converter is not None:
+            self.__output_converter.reset()
             return self.__output_converter.modify_state(
                 self.__core.state)
         else:
@@ -207,7 +208,7 @@ class SlapEnv(gym.Env):
                     if not done:
                         legal_actions = self.__core.legal_actions
                         reward = self.__output_converter.calculate_reward(self.__core.state, action, legal_actions,
-                                                                          self.__core.decision_mode)
+                                                                          "delivery")
                 else:
                     state_repr = state
             elif self.__core.state.current_order == "retrieval":  # if current order is a retrieval order
@@ -218,7 +219,7 @@ class SlapEnv(gym.Env):
                     if not done:
                         legal_actions = self.__core.legal_actions
                         reward = self.__output_converter.calculate_reward(self.__core.state, action, legal_actions,
-                                                                          self.__core.decision_mode)
+                                                                          "retrieval")
                 else:
                     state_repr = state
             elif self.__core.state.current_order == "charging_check":
@@ -229,7 +230,7 @@ class SlapEnv(gym.Env):
                     if not done:
                         legal_actions = self.__core.legal_actions
                         reward = self.__output_converter.calculate_reward(self.__core.state, action, legal_actions,
-                                                                          self.__core.decision_mode)
+                                                                          "charging_check")
                 else:
                     state_repr = state
             elif self.__core.state.current_order == "charging":
@@ -241,13 +242,14 @@ class SlapEnv(gym.Env):
                     if not done:
                         legal_actions = self.__core.legal_actions
                         reward = self.__output_converter.calculate_reward(self.__core.state, action, legal_actions,
-                                                                          self.__core.decision_mode)
+                                                                          "charging")
                 else:
                     state_repr = state
             # if self.__output_converter:
             #     assert state_repr.shape == (900, )
         if self.__core.decision_mode == "charging" or self.__core.decision_mode == "charging_check":
             self.current_state_repr = state_repr
+            self.core_env.state.current_agv = self.core_env.previous_event.agv.id
         return state_repr, reward, done
 
     def autoplay(self):
@@ -464,6 +466,7 @@ class SlapEnv(gym.Env):
         if self.__core.decision_mode == "delivery":
             return self.__storage_strategies[0].get_action(self.__core.state)
         elif self.__core.decision_mode == "charging_check":
+            # return agent_action[0].item()
             return agent_action
         else:
             return self.__retrieval_strategies[0].get_action(self.__core.state)

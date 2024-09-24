@@ -1,3 +1,4 @@
+import sys
 import time
 from typing import List, Union
 import os
@@ -13,7 +14,8 @@ from slapstack.helpers import parallelize_heterogeneously
 from slapstack.interface_templates import SimulationParameters
 from slapstack_controls.storage_policies import (ClassBasedPopularity,
                                                  ClassBasedCycleTime,
-                                                 ClosestOpenLocation, BatchFIFO, StoragePolicy)
+                                                 ClosestOpenLocation, BatchFIFO, StoragePolicy,
+                                                 ConstantTimeGreedyPolicy)
 
 from slapstack_controls.charging_policies import (FixedChargePolicy,
                                                   RandomChargePolicy,
@@ -21,6 +23,9 @@ from slapstack_controls.charging_policies import (FixedChargePolicy,
                                                   ChargingPolicy)
 
 from stable_baselines3 import DQN
+import os
+import subprocess
+
 
 
 def get_episode_env(sim_parameters: SimulationParameters,
@@ -120,13 +125,14 @@ def get_charging_strategies():
     charging_strategies = []
 
     charging_strategies += [
+        FixedChargePolicy(30),
         FixedChargePolicy(40),
         FixedChargePolicy(50),
         FixedChargePolicy(60),
         FixedChargePolicy(70),
         FixedChargePolicy(80),
-        # FixedChargePolicy(90),
-        # FixedChargePolicy(100),
+        FixedChargePolicy(90),
+        FixedChargePolicy(100),
         RandomChargePolicy([40, 50, 60, 70, 80], 1)
     ]
 
@@ -135,35 +141,35 @@ def get_charging_strategies():
 
 def get_storage_strategies(nr_zones: List[int]):
     storage_strategies = []
-    for n_zone in nr_zones:
-        storage_strategies += [
-            ClassBasedCycleTime(
-                n_orders=10000, recalculation_steps=1000, n_zones=n_zone),
-            ClassBasedPopularity(
-                retrieval_orders_only=False, n_zones=n_zone,
-                future_counts=True,
-                name=f'allOrdersPopularity_future_z{n_zone}'),
-            ClassBasedPopularity(
-                retrieval_orders_only=True, n_zones=n_zone,
-                future_counts=True,
-                name=f'retrievalPopularity_future_z{n_zone}'),
-            ClassBasedPopularity(
-                retrieval_orders_only=False, n_zones=n_zone,
-                future_counts=False, n_orders=10000, recalculation_steps=1000,
-                name=f'allOrdersPopularity_past_z{n_zone}'),
-            ClassBasedPopularity(
-                retrieval_orders_only=True, n_zones=n_zone,
-                future_counts=False, n_orders=10000, recalculation_steps=1000,
-                name=f'retrievalPopularity_past_z{n_zone}')
-        ]
+    # for n_zone in nr_zones:
+    #     storage_strategies += [
+    #         ClassBasedCycleTime(
+    #             n_orders=10000, recalculation_steps=1000, n_zones=n_zone),
+    #         ClassBasedPopularity(
+    #             retrieval_orders_only=False, n_zones=n_zone,
+    #             future_counts=True,
+    #             name=f'allOrdersPopularity_future_z{n_zone}'),
+    #         ClassBasedPopularity(
+    #             retrieval_orders_only=True, n_zones=n_zone,
+    #             future_counts=True,
+    #             name=f'retrievalPopularity_future_z{n_zone}'),
+    #         ClassBasedPopularity(
+    #             retrieval_orders_only=False, n_zones=n_zone,
+    #             future_counts=False, n_orders=10000, recalculation_steps=1000,
+    #             name=f'allOrdersPopularity_past_z{n_zone}'),
+    #         ClassBasedPopularity(
+    #             retrieval_orders_only=True, n_zones=n_zone,
+    #             future_counts=False, n_orders=10000, recalculation_steps=1000,
+    #             name=f'retrievalPopularity_past_z{n_zone}')
+    #     ]
     storage_strategies += [
-        ClosestOpenLocation(very_greedy=True),
-        ClosestOpenLocation(very_greedy=False),
+        # ClosestOpenLocation(very_greedy=True),
+       ClosestOpenLocation(very_greedy=False),
     ]
     return storage_strategies
 
 
-storage_policies = get_storage_strategies([2, 3, 5])
+storage_policies = get_storage_strategies([5])
 charging_strategies = get_charging_strategies()
 
 params = SimulationParameters(
@@ -174,14 +180,15 @@ params = SimulationParameters(
                 generate_orders=False,
                 verbose=False,
                 resetting=False,
-                initial_pallets_storage_strategy=ClassBasedPopularity(
-                    retrieval_orders_only=False,
-                    future_counts=True,
-                    init=True,
-                    # n_zones changes dynamically based on the slap strategy
-                    # in get_episode_env
-                    n_zones=2
-                ),
+                # initial_pallets_storage_strategy=ClassBasedPopularity(
+                #     retrieval_orders_only=False,
+                #     future_counts=True,
+                #     init=True,
+                #     # n_zones changes dynamically based on the slap strategy
+                #     # in get_episode_env
+                #     n_zones=2
+                # ),
+                initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
                 pure_lanes=True,
                 n_levels=3,
                 # https://logisticsinside.eu/speed-of-warehouse-trucks/
@@ -193,8 +200,26 @@ params = SimulationParameters(
             )
 
 if __name__ == '__main__':
+    # hashseed = os.getenv("PYTHONHASHSEED")
+    # if not hashseed:
+    #     os.environ["PYTHONHASHSEED"] = "0"
+    #     os.execv(sys.executable, [sys.executable] + sys.argv)
+
+    st = [ClosestOpenLocation(very_greedy=False)]
     n_charging_strategies = len(charging_strategies)
     n_storage_strategies = len(storage_policies)
+    # for i in range(n_charging_strategies):
+    #     print(f"Running sim with and charging strategy: {charging_strategies[i].name}")
+    #     run_episode(
+    #             simulation_parameters=params,
+    #             charging_strategy=charging_strategies[i],
+    #             storage_strategy=ClosestOpenLocation(very_greedy=False),
+    #             print_freq=10000,
+    #             steps_per_episode=120,
+    #             log_dir=
+    #             f'./result_data_charging_wepa/test2'
+    #             )
+
     # for i in range(n_storage_strategies):
     #     for j in range(n_charging_strategies):
     #         print(f"Running sim with storage strategy: {storage_policies[i].name} "
@@ -208,6 +233,19 @@ if __name__ == '__main__':
     #                 log_dir=
     #                 f'./result_data_charging_wepa'
     #                 )
+
+    # parallel charging strat
+    # parallelize_heterogeneously(
+    #     [run_episode] * n_charging_strategies,
+    #     list(zip([params] * n_charging_strategies,                    # params
+    #              charging_strategies,
+    #              st,  # policy
+    #              [0] * n_charging_strategies,                         # print_freq
+    #              [False] * n_charging_strategies,                     # warm_start
+    #              ['./result_data_charging_wepa'] * n_charging_strategies,
+    #              )))
+
+    # Strategies with charging
     all_combinations = [
         (params, charging_strategies[j], storage_policies[i], 100, 120, './result_data_charging_wepa')
         for i in range(n_storage_strategies)
@@ -216,6 +254,8 @@ if __name__ == '__main__':
     parallelize_heterogeneously(
         [run_episode] * len(all_combinations),
         all_combinations)
+
+    # Old loop
     # parallelize_heterogeneously(
     #     [run_episode] * n_strategies,
     #     list(zip([params] * n_strategies,                    # params

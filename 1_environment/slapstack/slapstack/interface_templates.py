@@ -57,6 +57,8 @@ class OutputConverter:
                          legal_actions: list, decision_mode: str):
         pass
 
+    def reset(self):
+        pass
 
 class SimulationParameters:
     def __init__(self,
@@ -122,12 +124,17 @@ class SimulationParameters:
         if use_case is not None:
             assert use_case_partition_to_use is not None
             assert use_case_n_partitions is not None
+            assert use_case_partition_to_use <= use_case_n_partitions
             self.n_levels = n_levels
             self.use_case_name = use_case
+            self.use_case_n_partitions = use_case_n_partitions
+            self.use_case_partition_to_use = use_case_partition_to_use
             self.layout_path, self.order_path, self.initial_sku_path = (
                 SimulationParameters.setup_paths(use_case))
+            if use_case_n_partitions > 1:
+                self.get_initial_partitions_data(use_case_n_partitions)
             use_case_partitions = self.partition_use_case(use_case_n_partitions)
-            use_case = use_case_partitions[use_case_partition_to_use]
+            use_case = use_case_partitions[self.use_case_partition_to_use]
             self.n_rows = use_case.layout.shape[0]
             self.n_columns = use_case.layout.shape[1]
             self.n_skus = len(use_case.distinct_skus)
@@ -204,28 +211,89 @@ class SimulationParameters:
 
         :return: The use case partitions.
         """
-        order_data = self.load_orders()
+        partition_idx = None
+        if self.use_case_n_partitions > 1:
+            partition_idx = self.use_case_partition_to_use
+        order_data = self.load_orders(partition_idx)
         all_skus = SimulationParameters.get_unique_skus(order_data)
         # skus_ini = get_initial_skus(order_data,
         #                             warehouse_capacity=19000,
         #                             initial_fill_level=0.6,
         #                             percent_nowait=0.8)
-        skus_ini, _ = self.load_initial_skus()
+        skus_ini, _ = self.load_initial_skus(partition_idx)
         part_size = int(len(order_data) / n_partitions)
         week = order_data[0][-1]
         uc = UseCasePartition(skus_ini, all_skus, self.layout_path,
                               self.n_levels)
         use_case_partitions = [uc]
+        # for order in order_data:
+        #     if uc.last_order - uc.first_order >= part_size:
+        #         # start a new partition
+        #         uc = UseCasePartition(uc.initial_skus[uc.current_week].copy(),
+        #                               uc.distinct_skus, self.layout_path,
+        #                               self.n_levels, uc.current_week,
+        #                               uc.last_order)
+        #         use_case_partitions.append(uc)
+        #     uc.add_order(order)
+
         for order in order_data:
-            if uc.last_order - uc.first_order >= part_size:
-                # start a new partition
-                uc = UseCasePartition(uc.initial_skus[uc.current_week].copy(),
-                                      uc.distinct_skus, self.layout_path,
-                                      self.n_levels, uc.current_week,
-                                      uc.last_order)
-                use_case_partitions.append(uc)
             uc.add_order(order)
         return use_case_partitions
+    
+    def get_initial_partitions_data(self, n_partitions: int):
+        import os
+        from copy import deepcopy
+
+        root_dir = sep.join([sep.join(
+            abspath(__file__).split(sep)[:-1]), "use_cases", self.use_case_name])
+
+        partition_dir = join(root_dir, "partitions")
+        if not os.path.exists(partition_dir):
+            os.makedirs(partition_dir)
+
+        skus_ini, _ = self.load_initial_skus(None)
+        order_data = self.load_orders(None)
+        part_size = int(len(order_data) / n_partitions)
+
+        i = 0
+        order_partitions = []
+        partition = []
+        for order in order_data:
+            if i >= part_size:
+                order_partitions.append(partition)
+                partition = []
+                i = 0
+            partition.append(order)
+            i += 1
+
+        if partition:
+            order_partitions.append(partition)
+
+        # ini_fill_lvl = (sum(skus_ini.values()) / 19512)
+        initial_pallets_path = f"partitions/0_partition_fill_lvl.json"
+        with open(join(root_dir, initial_pallets_path),
+                  'w', encoding='utf8') as json_file:
+            json.dump(skus_ini, json_file, ensure_ascii=False)
+        skus = deepcopy(skus_ini)
+        pt = 0
+        for orders in order_partitions:
+            fill_levels = []
+            for order in orders:
+                if order[0] == "retrieval":
+                    skus[order[1]] -= 1
+                elif order[0] == "delivery":
+                    skus[order[1]] += 1
+                fill_levels.append((sum(skus.values()) / 19512))
+            if max(fill_levels) <= 1:
+                partition_order_path = f"partitions/{pt}_partition_orders.json"
+                partition_pallets_path = f"partitions/{pt+1}_partition_fill_lvl.json"
+                with open(join(root_dir, partition_pallets_path),
+                          'w', encoding='utf8') as json_file:
+                    json.dump(skus, json_file, ensure_ascii=False)
+                with open(join(root_dir, partition_order_path),
+                          'w', encoding='utf8') as json_file:
+                    json.dump(orders, json_file, ensure_ascii=False)
+                pt += 1
 
     @staticmethod
     def get_unique_skus(
@@ -241,9 +309,17 @@ class SimulationParameters:
             skus.add(order[1])
         return skus
 
-    def load_initial_skus(self):
-        with open(self.initial_sku_path) as json_file:
-            initial_fill_json = json.load(json_file)
+    def load_initial_skus(self, use_case_idx: int):
+        if use_case_idx != None:
+            root_dir = sep.join([sep.join(
+                abspath(__file__).split(sep)[:-1]), "use_cases",
+                self.use_case_name])
+            partition_order_path = f"partitions/{use_case_idx}_partition_fill_lvl.json"
+            with open(join(root_dir, partition_order_path)) as json_file:
+                initial_fill_json = json.load(json_file)
+        else:
+            with open(self.initial_sku_path) as json_file:
+                initial_fill_json = json.load(json_file)
         skus_ini = defaultdict(int)
         all_skus = set(skus_ini.keys())
         for sku, amount in initial_fill_json.items():
@@ -251,9 +327,17 @@ class SimulationParameters:
             all_skus.add(int(sku))
         return skus_ini, all_skus
 
-    def load_orders(self):
-        with open(self.order_path) as json_file:
-            order_data = json.load(json_file)
+    def load_orders(self, use_case_idx: int):
+        if use_case_idx != None:
+            root_dir = sep.join([sep.join(
+                abspath(__file__).split(sep)[:-1]), "use_cases",
+                self.use_case_name])
+            partition_order_path = f"partitions/{use_case_idx}_partition_orders.json"
+            with open(join(root_dir, partition_order_path)) as json_file:
+                order_data = json.load(json_file)
+        else:
+            with open(self.order_path) as json_file:
+                order_data = json.load(json_file)
         return order_data
 
     @classmethod
@@ -272,6 +356,9 @@ class SimulationParameters:
         )
 
     def select_partition(self, partition_idx, period=1):
+        partition_idx = None
+        if self.use_case_n_partitions > 1:
+            partition_idx = self.use_case_partition_to_use
         use_case = self.partition_use_case(1)[0]
         self.n_rows = use_case.layout.shape[0]
         self.n_columns = use_case.layout.shape[1]
@@ -281,7 +368,7 @@ class SimulationParameters:
         self.order_list = use_case.order_list
         period = list(use_case.initial_skus.keys())[0]
         # self.initial_pallets_sku_counts = use_case.initial_skus[period]  # self.order_list[0][-1] / p
-        self.initial_pallets_sku_counts, _ = self.load_initial_skus()
+        self.initial_pallets_sku_counts, _ = self.load_initial_skus(partition_idx)
         self.n_sources = len(
             np.argwhere(use_case.layout == StorageKeys.SOURCE))
         self.n_sinks = len(np.argwhere(use_case.layout == StorageKeys.SINK))
