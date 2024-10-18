@@ -33,7 +33,7 @@ def get_eval_env(sim_parameters: SimulationParameters,
                     log_frequency: int, nr_zones: int, logfile_name: str,
                     log_dir='./result_data/'):
     seeds = [56513]
-    partitions = [0]
+    partitions = [None]
     return SlapEnv(
         sim_parameters, seeds, partitions,
         logger=ExperimentLogger(
@@ -52,7 +52,7 @@ def get_episode_env(sim_parameters: SimulationParameters,
                     log_frequency: int, nr_zones: int, logfile_name: str,
                     log_dir='./result_data/', partitions=None):
     if partitions is None:
-        partitions = [0]
+        partitions = [None]
     seeds = [56513]
     return SlapEnv(
         sim_parameters, seeds, partitions,
@@ -139,27 +139,31 @@ def run_episode(simulation_parameters: SimulationParameters,
 
 
 if __name__ == '__main__':
-    log_dir_init = './result_data_charging_wepa/init'
-    log_dir = './result_data_charging_wepa'
-    logfile_name = f'DQN_wepastacks'
+    log_dir_init = './result_data_charging_cross/init'
+    log_dir = './result_data_charging_cross'
+    logfile_name = f'DQN_crossstacks'
 
     params = SimulationParameters(
-        use_case="wepastacks_bm",
-        use_case_n_partitions=20,
+        use_case="crossstacks_bm",
+        use_case_n_partitions=1,
         use_case_partition_to_use=0,
-        n_agvs=40,
+        n_agvs=21,
         generate_orders=False,
         verbose=False,
         resetting=False,
-        initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
-        pure_lanes=True,
-        n_levels=3,
+        initial_pallets_storage_strategy=ClosestOpenLocation(),
+        pure_lanes=False,
         # https://logisticsinside.eu/speed-of-warehouse-trucks/
-        agv_speed=2,
-        unit_distance=1.4,
-        pallet_shift_penalty_factor=20,  # in seconds
+        agv_speed=1.2,
+        unit_distance=1.1,
+        pallet_shift_penalty_factor=90,  # in seconds
+        material_handling_time=45,
         compute_feature_trackers=True,
-        charging_thresholds=[40, 50, 60, 70, 80],
+        n_levels=1,
+        door_to_door=True,
+        # update_partial_paths=False,
+        agv_forks=1,
+        charging_thresholds=[40, 50, 60, 70, 80]
     )
 
     env: SlapEnv = get_episode_env(
@@ -167,11 +171,11 @@ if __name__ == '__main__':
         log_frequency=1000, nr_zones=3, log_dir=log_dir_init,
         logfile_name=logfile_name)
 
-    net_arch = [125, 125]
+    net_arch = [256, 256]
     policy_kwargs = dict(net_arch=net_arch)
     model = DQN("MlpPolicy", env,
                 learning_rate=0.00001,
-                buffer_size=5000,  # 500
+                buffer_size=100000,  # 500
                 learning_starts=120,
                 batch_size=128,
                 tau=1,
@@ -194,7 +198,6 @@ if __name__ == '__main__':
                 device='auto',
                 _init_setup_model=True,
                 )
-    # model = model.load("./model_r1_charging_wepaDQN_100000_128_0.33_256_256_100_1.zip", env=env)
     start = time.time()
     output_string = create_output_str(model, net_arch)
     # eval_env = deepcopy(env)
@@ -219,32 +222,37 @@ if __name__ == '__main__':
 
     # model.learn(total_timesteps=20000, progress_bar=False, log_interval=1,
     #             callback=[eval_callback],
-    #             tb_log_name="R1_charging_wepa" + output_string)
-    # model.save(f"./model_r1_charging_wepa" + output_string + ".zip")
-    train_pt = "0_13"
-    model = model.load(f"./logs/best_model/dqn/pt{train_pt}_DQN5000_best_model.zip")
+    #             tb_log_name="R1_charging_cross" + output_string)
+    # model.save(f"./model_r1_charging_cross" + output_string + ".zip")
+
+    model = model.load("./logs/best_model/dqn/pt0_DQN5000_best_model.zip")
+    # model = model.load("./model_r1_charging_crossDQN_100000_128_0.33_256_256_100_1.zip")
     # model = model.load("./model_r1_charging_wepaDQN_100000_128_0.33_256_256_100_1.zip")
-    n_partitions = 20
-    for pt_idx in range(n_partitions):
-        params = SimulationParameters(
-            use_case="wepastacks_bm",
-            use_case_n_partitions=n_partitions,
-            use_case_partition_to_use=pt_idx,
-            n_agvs=40,
-            generate_orders=False,
-            verbose=False,
-            resetting=False,
-            initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
-            pure_lanes=True,
-            n_levels=3,
-            # https://logisticsinside.eu/speed-of-warehouse-trucks/
-            agv_speed=2,
-            unit_distance=1.4,
-            pallet_shift_penalty_factor=20,  # in seconds
-            compute_feature_trackers=True,
-            charging_thresholds=[40, 50, 60, 70, 80],
-        )
-        run_episode(simulation_parameters=params, charging_strategy=model,
-                    print_freq=100000,
-                    log_dir=f'./result_data_charging/val_dqn/{train_pt}')
+    # n_partitions = 20
+    # for pt_idx in range(n_partitions):
+    #     params = SimulationParameters(
+    #         use_case="crossstacks_bm",
+    #         use_case_n_partitions=1,
+    #         use_case_partition_to_use=0,
+    #         n_agvs=21,
+    #         generate_orders=False,
+    #         verbose=False,
+    #         resetting=False,
+    #         initial_pallets_storage_strategy=ClosestOpenLocation(),
+    #         pure_lanes=False,
+    #         # https://logisticsinside.eu/speed-of-warehouse-trucks/
+    #         agv_speed=1.2,
+    #         unit_distance=1.1,
+    #         pallet_shift_penalty_factor=90,  # in seconds
+    #         material_handling_time=45,
+    #         compute_feature_trackers=True,
+    #         n_levels=1,
+    #         door_to_door=True,
+    #         # update_partial_paths=False,
+    #         agv_forks=1,
+    #         charging_thresholds=[40, 50, 60, 70, 80]
+    #     )
+    run_episode(simulation_parameters=params, charging_strategy=model,
+                print_freq=100000,
+                log_dir=f'./result_data_charging/cross/val_dqn')
 

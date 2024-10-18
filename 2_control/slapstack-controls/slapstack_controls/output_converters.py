@@ -1,4 +1,4 @@
-from math import sqrt
+from math import sqrt, inf
 
 import numpy as np
 
@@ -295,7 +295,8 @@ class FeatureConverter(OutputConverter):
 
 
 class FeatureConverterCharging(OutputConverter):
-    def __init__(self, feature_list):
+    def __init__(self, feature_list, decision_mode="charging", reward_setting=1):
+        self.decision_mode = decision_mode
         self.rewards = []
         self.feature_list = feature_list
         self.fill_level_per_lane = None
@@ -317,6 +318,7 @@ class FeatureConverterCharging(OutputConverter):
         self.n_stacks = 3
         self.running_avg = 0
         self.feature_stack = np.zeros((0, 0))
+        self.reward_setting = reward_setting
 
     def init_fill_level_per_lane(self, state: State):
         lt: LocationTrackers = state.location_manager.location_trackers
@@ -357,22 +359,38 @@ class FeatureConverterCharging(OutputConverter):
 
     @staticmethod
     def f_get_time_next_event(state: State):
-        return state.peek_time_feature
+        return state.time_to_next_event
 
     @staticmethod
     def f_get_utilization(state: State):
         agvm = state.agv_manager
         return agvm.n_busy_agvs / agvm.n_agvs
 
-    def f_get_state_time(self, state: State):
-        # deltas zeit letzer zustand und aktuelle
-        time = 0
-        if state.decision_mode == "charging":
-            if self.time_last_step == 0:
-                time = 0
-            else:
-                time = state.time - self.time_last_step
-        return time
+    @staticmethod
+    def f_get_charging_utilization(state: State):
+        agvm = state.agv_manager
+        return agvm.n_charging_agvs / agvm.n_agvs
+
+    @staticmethod
+    def f_get_dist_to_cs(state: State):
+        agv_id = state.current_agv
+        if not agv_id:
+            return 0
+        agv = state.agv_manager.agv_index[agv_id]
+        agv_position = agv.position
+        min_distance = inf
+        for cs_position in state.agv_manager.charging_stations:
+            d = state.agv_manager.router.get_distance(
+                agv_position,
+                (cs_position[0], cs_position[1])
+            )
+            if d < min_distance:
+                min_distance = d
+        return min_distance
+
+    @staticmethod
+    def f_get_state_time(state: State):
+        return state.time / (24 * 3600)
 
     def f_get_lane_fill_level_avg(self, state: State):
         if self.fill_level_per_lane is None:
@@ -391,12 +409,13 @@ class FeatureConverterCharging(OutputConverter):
 
     @staticmethod
     def f_get_global_fill_level(state: State):
-        lt: LocationTrackers = state.location_manager.location_trackers
-        return 1 - lt.n_open_locations / lt.n_total_locations
+        # lt: LocationTrackers = state.location_manager.location_trackers
+        # return 1 - lt.n_open_locations / lt.n_total_locations
+        return state.trackers.get_fill_level()
 
     def f_get_queue_len_charging_station(self, state: State):
         agvm = state.agv_manager
-        queue_per_station = {cs: 0 for cs in agvm.free_charging_stations}
+        queue_per_station = {cs: 0 for cs in range(agvm.n_charging_stations)}
         for cs in agvm.booked_charging_stations.keys():
             queue_per_station[cs] = len(agvm.booked_charging_stations[cs])
         if np.average(list(queue_per_station.values())) > self.max_queue_len:
@@ -462,6 +481,7 @@ class FeatureConverterCharging(OutputConverter):
         #self.time_last_step = state.time
         #return np.array(features)
         return np.array(features)
+        # return self.feature_stack
         # else:
         #     return np.zeros((self.n_stacks, len(self.feature_list)))
 
@@ -492,7 +512,7 @@ class FeatureConverterCharging(OutputConverter):
         #     self.n_stacks = 3
         #     self.feature_stack = np.zeros((0, 0))
 
-        if decision_mode == "charging" and not isinstance(action, tuple):
+        if decision_mode == self.decision_mode and not isinstance(action, tuple):
             # Reward 0
             # return - state.trackers.average_service_time
 
@@ -507,26 +527,47 @@ class FeatureConverterCharging(OutputConverter):
             #     self.time_last_step = 0
             #     self.n_stacks = 3
             #     self.feature_stack = np.zeros((0, 0))
-            self.n_observations += 1
-            current_service_time = state.trackers.average_service_time
-            delta_service_time = self.service_time_last_step - current_service_time
-            self.service_time_last_step = current_service_time
-            self.running_avg += delta_service_time
-            state.running_avg = self.running_avg
-            self.rewards.append(delta_service_time)
-            state.rewards = self.rewards
-            # self.n_orders_last_step = n_orders_now
-            return delta_service_time
+            if self.reward_setting == 1:
+                self.n_observations += 1
+                current_service_time = state.trackers.average_service_time
+                delta_service_time = self.service_time_last_step - current_service_time
+                self.service_time_last_step = current_service_time
+                self.running_avg += delta_service_time
+                state.running_avg = self.running_avg
+                self.rewards.append(delta_service_time)
+                state.rewards = self.rewards
+                # self.n_orders_last_step = n_orders_now
+                return delta_service_time
             #Reward 2
-            # if state.agv_manager.agv_trackers.n_charges == 0:
-            #     self.service_time_last_step = state.trackers.average_service_time
-            #     return 0
-            #
-            # current_service_time = state.trackers.average_service_time
-            # delta_service_time = self.service_time_last_step - current_service_time
-            # self.service_time_last_step = current_service_time
-            # # self.n_orders_last_step = n_orders_now
-            # return delta_service_time
+            elif self.reward_setting == 2:
+                if state.agv_manager.agv_trackers.n_charges == 0:
+                    self.service_time_last_step = state.trackers.average_service_time
+                    return 0
+
+                current_service_time = state.trackers.average_service_time
+                delta_service_time = self.service_time_last_step - current_service_time
+                self.service_time_last_step = current_service_time
+                # self.n_orders_last_step = n_orders_now
+                return delta_service_time
+            elif self.reward_setting == 3:
+                return - state.trackers.average_service_time
+            elif self.reward_setting == 4:
+                agv_id = state.current_agv
+                if not agv_id:
+                    return 0
+                else:
+                    mean_util = state.agv_manager.get_average_utilization() / state.time
+                    mean_battery = state.agv_manager.get_average_agv_battery() / 100
+                    return mean_util # - mean_battery
 
         else:
             return 0
+
+    @staticmethod
+    def valid_action_mask(self, state: State):
+        agv_id = state.current_agv
+        agv = state.agv_manager.agv_index[agv_id]
+        battery_level = agv.battery
+        charging_thresholds = np.array(state.params.charging_thresholds)
+        mask = (charging_thresholds == 0) | (charging_thresholds > battery_level)
+        return mask

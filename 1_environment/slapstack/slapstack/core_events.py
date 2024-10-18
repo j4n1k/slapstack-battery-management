@@ -946,10 +946,11 @@ class ChargingFirstLeg(Travel):
     def __init__(self, state: 'State', start_point: Tuple[int, int],
                  end_point: Tuple[int, int], travel_type: str,
                  level: int, orders, order, agv_id: int, core,
-                 servicing_retrieval_order: Retrieval = None):
+                 servicing_retrieval_order: Retrieval = None, fixed_charging_duration=None):
         super().__init__(state, start_point, end_point, travel_type,
                          level, orders, order,
                          TravelEventKeys.CHARGING_FIRST_LEG, agv_id)
+        self.fixed_charging_duration = fixed_charging_duration
         if state.agv_manager.agv_index[agv_id].free:
             locs = state.agv_manager.get_agv_locations()
             # assert start_point in locs.keys()
@@ -963,10 +964,10 @@ class ChargingFirstLeg(Travel):
             # end_pos = state.agv_manager.get_close_idle_position(start_point)
             self.agv: AGV = state.agv_manager.book_agv(
                 start_point, state.time, target_idx,
-                self.travel_type, core.events)
+                self.travel_type, core.events, charging_booking=True)
         else:
             self.agv = state.agv_manager.agv_index[agv_id]
-
+        self.agv.charging_needed = True
         assert self.agv.free == False
         assert self.agv.id == agv_id
 

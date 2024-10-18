@@ -60,21 +60,24 @@ def _init_run_loop(simulation_parameters,
     th = None
     if isinstance(charging_strategy, FixedChargePolicy):
         th = charging_strategy.charging_threshold
+    if isinstance(charging_strategy, DQN):
+        th = "DQN"
     elif isinstance(charging_strategy, RandomChargePolicy):
         th = "random"
+    pt = simulation_parameters.use_case_partition_to_use
     if hasattr(storage_strategy, 'n_zones'):
         environment: SlapEnv = get_episode_env(
             sim_parameters=simulation_parameters,
             storage_strategy=storage_strategy,
             log_frequency=1000,
             nr_zones=storage_strategy.n_zones, log_dir=log_dir,
-            logfile_name=f'{storage_strategy.name}_{charging_strategy.name}_th{th}')
+            logfile_name=f'pt_{pt}_{storage_strategy.name}_{charging_strategy.name}_th{th}')
     else:
         environment: SlapEnv = get_episode_env(
             sim_parameters=simulation_parameters,
             storage_strategy=storage_strategy,
             log_frequency=1000, nr_zones=3, log_dir=log_dir,
-            logfile_name=f'{storage_strategy.name}_{charging_strategy.name}_th{th}')
+            logfile_name=f'pt_{pt}_{storage_strategy.name}_{charging_strategy.name}_th{th}')
     loop_controls = LoopControl(environment, steps_per_episode=120)
     # state.state_cache.perform_sanity_check()
     return environment, loop_controls
@@ -125,15 +128,15 @@ def get_charging_strategies():
     charging_strategies = []
 
     charging_strategies += [
-        # FixedChargePolicy(30),
-        # FixedChargePolicy(40),
-        # FixedChargePolicy(50),
-        # FixedChargePolicy(60),
+        FixedChargePolicy(30),
+        FixedChargePolicy(40),
+        FixedChargePolicy(50),
+        FixedChargePolicy(60),
         FixedChargePolicy(70),
-        # FixedChargePolicy(80),
-        # FixedChargePolicy(90),
-        # FixedChargePolicy(100),
-        # RandomChargePolicy([40, 50, 60, 70, 80], 1)
+        FixedChargePolicy(80),
+        FixedChargePolicy(90),
+        FixedChargePolicy(100),
+        RandomChargePolicy([40, 50, 60, 70, 80], 42)
     ]
 
     return charging_strategies
@@ -168,36 +171,9 @@ def get_storage_strategies(nr_zones: List[int]):
     ]
     return storage_strategies
 
-
 storage_policies = get_storage_strategies([5])
 charging_strategies = get_charging_strategies()
 
-params = SimulationParameters(
-                use_case="wepastacks_bm",
-                use_case_n_partitions=20,
-                use_case_partition_to_use=0,
-                n_agvs=40,
-                generate_orders=False,
-                verbose=False,
-                resetting=False,
-                # initial_pallets_storage_strategy=ClassBasedPopularity(
-                #     retrieval_orders_only=False,
-                #     future_counts=True,
-                #     init=True,
-                #     # n_zones changes dynamically based on the slap strategy
-                #     # in get_episode_env
-                #     n_zones=2
-                # ),
-                initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
-                pure_lanes=True,
-                n_levels=3,
-                # https://logisticsinside.eu/speed-of-warehouse-trucks/
-                agv_speed=2,
-                unit_distance=1.4,
-                pallet_shift_penalty_factor=20,  # in seconds
-                compute_feature_trackers=True,
-                charging_thresholds=[40, 50, 60, 70, 80],
-            )
 
 if __name__ == '__main__':
     # hashseed = os.getenv("PYTHONHASHSEED")
@@ -208,52 +184,36 @@ if __name__ == '__main__':
     st = [ClosestOpenLocation(very_greedy=False)]
     n_charging_strategies = len(charging_strategies)
     n_storage_strategies = len(storage_policies)
-    # for i in range(n_charging_strategies):
-    #     print(f"Running sim with and charging strategy: {charging_strategies[i].name}")
-    #     run_episode(
-    #             simulation_parameters=params,
-    #             charging_strategy=charging_strategies[i],
-    #             storage_strategy=ClosestOpenLocation(very_greedy=False),
-    #             print_freq=10000,
-    #             steps_per_episode=120,
-    #             log_dir=
-    #             f'./result_data_charging_wepa/test2'
-    #             )
-
-    # for i in range(n_storage_strategies):
-    #     for j in range(n_charging_strategies):
-    #         print(f"Running sim with storage strategy: {storage_policies[i].name} "
-    #               f"and charging strategy: {charging_strategies[j].name}")
-    #         run_episode(
-    #                 simulation_parameters=params,
-    #                 charging_strategy=charging_strategies[j],
-    #                 storage_strategy=storage_policies[i],
-    #                 print_freq=100,
-    #                 steps_per_episode=120,
-    #                 log_dir=
-    #                 f'./result_data_charging_wepa'
-    #                 )
-
-    # parallel charging strat
-    # parallelize_heterogeneously(
-    #     [run_episode] * n_charging_strategies,
-    #     list(zip([params] * n_charging_strategies,                    # params
-    #              charging_strategies,
-    #              st,  # policy
-    #              [0] * n_charging_strategies,                         # print_freq
-    #              [False] * n_charging_strategies,                     # warm_start
-    #              ['./result_data_charging_wepa'] * n_charging_strategies,
-    #              )))
+    n_partitions = 20
 
     # Strategies with charging
-    all_combinations = [
-        (params, charging_strategies[j], storage_policies[i], 100, 120, './result_data_charging_wepa')
-        for i in range(n_storage_strategies)
-        for j in range(n_charging_strategies)
-    ]
-    parallelize_heterogeneously(
-        [run_episode] * len(all_combinations),
-        all_combinations)
+    for pt_idx in range(n_partitions):
+        params = SimulationParameters(
+            use_case="wepastacks_bm",
+            use_case_n_partitions=n_partitions,
+            use_case_partition_to_use=pt_idx,
+            n_agvs=40,
+            generate_orders=False,
+            verbose=False,
+            resetting=False,
+            initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+            pure_lanes=True,
+            n_levels=3,
+            # https://logisticsinside.eu/speed-of-warehouse-trucks/
+            agv_speed=2,
+            unit_distance=1.4,
+            pallet_shift_penalty_factor=20,  # in seconds
+            compute_feature_trackers=True,
+            charging_thresholds=[40, 50, 60, 70, 80],
+        )
+        all_combinations = [
+            (params, charging_strategies[j], storage_policies[i], 100, 120, './result_data_charging_pt_wepa')
+            for i in range(n_storage_strategies)
+            for j in range(n_charging_strategies)
+        ]
+        parallelize_heterogeneously(
+            [run_episode] * len(all_combinations),
+            all_combinations)
 
     # Old loop
     # parallelize_heterogeneously(

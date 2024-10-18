@@ -93,7 +93,9 @@ class SlapCore(gym.Env):
         """
         self.inpt = usr_inpt
         self.rng = None
+        self.partition = None
         self.set_seed(usr_inpt.seed)
+        self.set_partition(usr_inpt.partition)
         self.events = EventManager()
         self.state = State(usr_inpt.params, self.events, self.rng)
         self.orders = SlapOrders(usr_inpt.params,
@@ -134,6 +136,9 @@ class SlapCore(gym.Env):
 
     def set_seed(self, seed):
         self.rng = np.random.default_rng(seed)
+
+    def set_partition(self, partition):
+        self.partition = partition
 
     def create_orders_from_distribution(self):
         """creates delivery and retrieval orders automatically based on input
@@ -249,7 +254,7 @@ class SlapCore(gym.Env):
         self.print("~" * 150 + "\n" + "reset\n" + "~" * 150)
         self.__init__(self.inpt, self.logger)
         self._assert_orders()
-        self.inpt.params.select_partition(0)
+        self.inpt.params.select_partition(self.partition)
         self.orders = SlapOrders(self.inpt.params, self.state.get_n_storage_locations())
         if not self.orders.generate_orders:
             self.create_orders_from_list()
@@ -290,6 +295,7 @@ class SlapCore(gym.Env):
         while (not action_needed
                and (e.running or retrieval_ok or delivery_ok)):
             self.print("~" * 150 + "\n" + "step no action \n" + "~" * 150)
+            s.time_to_next_event = self.peek_next_event_time()
             next_event = None
             # if there are serviceable queued events, take care of them first.
             if (retrieval_ok or delivery_ok) and\
@@ -309,6 +315,15 @@ class SlapCore(gym.Env):
             self.print("legal actions for " + self.decision_mode +
                        " order: " + str(self.legal_actions))
         return False
+
+    def peek_next_event_time(self):
+        s, e = self.state, self.events
+        next_event_peek = e.running[0]
+        state_time = s.time
+        s.set_main_event_time(next_event_peek)
+        next_event_peek_time = s.next_main_event_time
+        time_delta = next_event_peek_time - state_time
+        return time_delta
 
     # @profile
     def handle_event_and_update_env(self, next_event: Event) -> bool:
@@ -508,7 +523,9 @@ class SlapCore(gym.Env):
 
     def __create_event_on_cs_arrival(
             self, action: int):
-        prev_e = self.previous_event
+        prev_e: ChargingFirstLeg = self.previous_event
+        if prev_e.fixed_charging_duration:
+            action = prev_e.fixed_charging_duration
         # TODO Revisit EventType und Events
         # delivery_order: Union[Delivery, None] = None
         time_done = self.state.time + action
@@ -530,8 +547,14 @@ class SlapCore(gym.Env):
         if action == 1:
             #agv: AGV = self.state.agv_manager.agv_index[prev_e.agv_id]
             agv = prev_e.agv
+            agvm = self.state.agv_manager
             agv.scheduled_charging = False
             cs = self.state.agv_manager.get_charging_station(agv.position, None)
+            # left_to_full = 100 - agv.battery
+            # charging_duration = None
+            # if 0 < action <= 1:
+            #     charging_duration = left_to_full / agvm.charging_rate
+            #     charging_duration = charging_duration * action
             ChargingFirstLeg.charging_nr += 1
             dummy_charging_order = Order(
                 -np.infty, -999, ChargingFirstLeg.charging_nr * -1, -999, False)
@@ -545,7 +568,10 @@ class SlapCore(gym.Env):
                 orders=None,
                 order=dummy_charging_order,
                 agv_id=agv.id,
-                core=self.events)
+                core=self.events,
+                # fixed_charging_duration=charging_duration
+            )
+
         elif action == 0:
             agv = prev_e.agv
             self.state.agv_manager.release_agv(prev_e.last_node, self.state.time, agv.id)

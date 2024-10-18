@@ -100,12 +100,12 @@ def get_charging_strategies():
 
     charging_strategies += [
         # FixedChargePolicy(40),
-        # FixedChargePolicy(50),
+        FixedChargePolicy(50),
         # FixedChargePolicy(60),
         # FixedChargePolicy(70),
         # FixedChargePolicy(80),
-        # FixedChargePolicy(90),
-        FixedChargePolicy(100),
+        FixedChargePolicy(90),
+        # FixedChargePolicy(100),
         # RandomChargePolicy([40, 50, 60, 70, 80], 1)
     ]
 
@@ -143,7 +143,7 @@ if __name__ == '__main__':
         run_episode(
                 simulation_parameters=params,
                 charging_strategy=charging_strategies[i],
-                print_freq=1000,
+                print_freq=100000,
                 steps_per_episode=120,
                 log_dir=
                 f'./result_data_charging_crossstacks'

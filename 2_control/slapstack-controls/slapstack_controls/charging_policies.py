@@ -92,7 +92,7 @@ class RandomChargePolicy(ChargingPolicy):
         self.seed = seed
 
     def get_action(self, state: State, agv_id=None):
-        random.seed(self.seed)
+        # random.seed(self.seed)
         agv: AGV = state.agv_manager.agv_index[agv_id]
         random_th = random.choice(self.charging_thresholds)
         charge_to_full = random_th - agv.battery

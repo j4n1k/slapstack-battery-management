@@ -1,0 +1,4 @@
+task:
+  name: "charging"
+  reward_setting: 1
+  charging_thresholds: [40, 80]

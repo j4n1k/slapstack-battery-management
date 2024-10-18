@@ -1,0 +1,24 @@
+model.agent.model_params.learning_rate:
+  type: float
+  low: 1e-5
+  high: 1e-2
+  log: true
+model.agent.model_params.batch_size:
+  type: categorical
+  choices: [32, 64, 128, 256]
+model.agent.model_params.buffer_size:
+  type: categorical
+  choices: [10000, 50000, 100000, 500000]
+model.agent.model_params.gamma:
+  type: float
+  low: 0.9
+  high: 0.9999
+experiment.total_timesteps:
+  type: categorical
+  choices: [200]
+experiment.t_pt:
+  type: categorical
+  choices: [13]
+experiment.n_cs:
+  type: categorical
+  choices: [4]

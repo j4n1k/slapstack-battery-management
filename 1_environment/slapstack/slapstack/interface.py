@@ -17,6 +17,7 @@ from slapstack.interface_templates import SimulationParameters, SlapLogger, \
 
 class SlapEnv(gym.Env):
     def __init__(self, environment_parameters: SimulationParameters, seeds='',
+                 partitions='',
                  logger: Union[SlapLogger, str, None] = None,
                  state_converter: Union[OutputConverter, None] = None,
                  action_converters: Union[List[StorageStrategy], None] = None):
@@ -30,10 +31,19 @@ class SlapEnv(gym.Env):
             self.__seeds_remaining = []
             self.__seeds_used = []
             init_seed = 1
-        self.__env_input = Input(environment_parameters, init_seed)
+        if bool(partitions):
+            self.__partitions_remaining = partitions[1:]
+            self.__partitions_used = [partitions[0]]
+            init_partition = partitions[0]
+        else:
+            self.__partitions_remaining = []
+            self.__partitions_used = []
+            init_partition = None
+        self.__env_input = Input(environment_parameters, init_seed, init_partition)
         self.__core = SlapCore(deepcopy(self.__env_input), logger)
         self.__core.reset()
         self.__output_converter = state_converter
+        self.feature_list = state_converter.feature_list
         self.__strategy_configuration = -1
         self.__storage_strategies = None
         self.__retrieval_strategies = None
@@ -53,10 +63,10 @@ class SlapEnv(gym.Env):
     def make_deterministic(self):
         travel_events = []
         for event in self.__core.events.running:
-            if isinstance(event, DeliveryFirstLeg) or isinstance(event,
-                    DeliverySecondLeg) or isinstance(event,
-                    RetrievalFirstLeg) or isinstance(event,
-                    RetrievalSecondLeg):
+            if (isinstance(event, DeliveryFirstLeg) or
+                    isinstance(event,DeliverySecondLeg) or
+                    isinstance(event, RetrievalFirstLeg) or
+                    isinstance(event, RetrievalSecondLeg)):
                 heap.heappush(travel_events, event)
         self.__core.events.running = travel_events
 
@@ -174,7 +184,8 @@ class SlapEnv(gym.Env):
     def reset(self):
         # self.__core = SlapCore(self.__env_input)
         # seed cycling if seeds were passed
-        if bool(self.__seeds_remaining) or bool(self.__seeds_used):
+        if ((bool(self.__seeds_remaining) or bool(self.__seeds_used)) or
+                (bool(self.__partitions_remaining) or bool(self.__partitions_used))):
             if len(self.__seeds_remaining) > 0:
                 seed = self.__seeds_remaining.pop(0)
                 self.__seeds_used.append(seed)
@@ -182,7 +193,15 @@ class SlapEnv(gym.Env):
                 self.__seeds_remaining = self.__seeds_used[1:]
                 seed = self.__seeds_used[0]
                 self.__seeds_used = [seed]
-            self.__env_input = Input(self.__env_input.params, seed)
+            if len(self.__partitions_remaining) > 0:
+                pt = self.__partitions_remaining.pop(0)
+                # self.__partitions_remaining.append(pt)
+                self.__partitions_used.append(pt)
+            else:
+                self.__partitions_remaining = self.__partitions_used[1:]
+                pt = self.__partitions_used[0]
+                self.__partitions_used = [pt]
+            self.__env_input = Input(self.__env_input.params, seed, pt)
         else:
             self.__env_input = Input(self.__env_input.params)
         self.__core = SlapCore(self.__env_input, self.__core.logger)
@@ -255,7 +274,7 @@ class SlapEnv(gym.Env):
     def autoplay(self):
         """
         checks whether the next action can be played automatically, like
-        when there is a fixed strategy (configs 1, 3, 4, 5 and 7)
+        when there is a fixed strategy (config 1, 3, 4, 5 and 7)
          """
         return ((self.__core.decision_mode == "delivery" and
                  self.__strategy_configuration in {3, 4, 5, 9}) or
@@ -291,7 +310,7 @@ class SlapEnv(gym.Env):
         n_cs = self.__charging_strategies.shape[0]
         if n_ss == 1 and n_rs == 1 and n_cs == 1:
             self.__strategy_configuration = 9
-        elif n_ss == 0 and n_rs == 0: # direct actions only
+        elif n_ss == 0 and n_rs == 0:  # direct actions only
             self.__strategy_configuration = 0
         elif n_ss == 0 and n_rs == 1:
             self.__strategy_configuration = 1
@@ -354,7 +373,11 @@ class SlapEnv(gym.Env):
             self.action_space = gym.spaces.Discrete(n_ss)
         elif self.__strategy_configuration == 9:
             # Go to charging -> binary decision
-            self.action_space = gym.spaces.Discrete(2)
+            if isinstance(self.__core.inpt.params.charging_thresholds, tuple):
+                low, high = self.__core.inpt.params.charging_thresholds
+                self.action_space = gym.spaces.Box(low=low, high=high)
+            else:
+                self.action_space = gym.spaces.Discrete(2)
         else:  # self.__strategy_configuration == 8:
             self.action_space = gym.spaces.Discrete(n_ss + n_rs)
 
@@ -384,7 +407,7 @@ class SlapEnv(gym.Env):
         :return: The action compatible with the core.
         """
         if ((self.__core.decision_mode == "charging" and
-            not self.__output_converter) or
+             not self.__output_converter) or
                 (self.__core.decision_mode == "charging_check" and not self.__output_converter)):
             # TODO: skip if RL
             return self.__transform_a_charging_duration(agent_action)
@@ -432,7 +455,6 @@ class SlapEnv(gym.Env):
             return agent_action
         else:
             return self.__retrieval_strategies[0].get_action(self.__core.state)
-
 
     def __transform_a_direct_storage_selectable_retrieval(self, agent_action):
         # config 2
@@ -527,6 +549,16 @@ class SlapEnv(gym.Env):
     @property
     def strategy_configuration(self):
         return self.__strategy_configuration
+
+    def valid_action_mask(self):
+        state = self.core_env.state
+        agv_id = state.current_agv
+        agv = state.agv_manager.agv_index[agv_id]
+        battery_level = agv.battery
+        charging_thresholds = np.array(state.params.charging_thresholds)
+        mask = (charging_thresholds == 0) | (charging_thresholds > battery_level)
+        return mask
+
     # </editor-fold>
 
     def __deepcopy__(self, memo):

@@ -1,0 +1,12 @@
+agent:
+  name: "SAC"
+  model_params:
+    buffer_size: 1000
+    learning_starts: 140
+    batch_size: 128
+    gamma: 0.99
+    train_freq: 1
+    gradient_steps: 1
+    target_update_interval: 1
+    policy_kwargs:
+      net_arch: [125, 125]

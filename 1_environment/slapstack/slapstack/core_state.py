@@ -261,6 +261,7 @@ class State:
 
         """
         # simulation inpt
+        self.next_main_event_time = 0
         self.n_initial_storage = -1
         self.params: SimulationParameters = params
         # matrices
@@ -298,6 +299,7 @@ class State:
         self.done = False
         self.current_destination = None
         self.door_to_door = params.door_to_door
+        self.time_to_next_event = 0
 
     def get_mid_aisles(self):
         mid_aisles = [tuple(i[0:2]) for i in np.argwhere(self.S[:, :, 0] ==
@@ -746,6 +748,12 @@ class State:
 
     def set_current_destination(self, destination):
             self.current_destination = destination
+
+    def set_main_event_time(self, main_event):
+        if main_event.time > self.next_main_event_time:
+            self.next_main_event_time = main_event.time
+        else:
+            pass
 
     def __deepcopy__(self, memo):
         return faster_deepcopy(self, memo)

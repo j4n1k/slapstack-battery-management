@@ -33,7 +33,7 @@ def get_eval_env(sim_parameters: SimulationParameters,
                     log_frequency: int, nr_zones: int, logfile_name: str,
                     log_dir='./result_data/'):
     seeds = [56513]
-    partitions = [0]
+    partitions = [13]
     return SlapEnv(
         sim_parameters, seeds, partitions,
         logger=ExperimentLogger(
@@ -43,7 +43,7 @@ def get_eval_env(sim_parameters: SimulationParameters,
             logfile_name=logfile_name), state_converter=FeatureConverterCharging(
             ["n_depleted_agvs", "avg_battery", "curr_agv_battery", "utilization",
              "queue_len_charging_station",  "global_fill_level",
-             "queue_len_retrieval_orders", "queue_len_delivery_orders"]),
+             "queue_len_retrieval_orders", "queue_len_delivery_orders"], reward_setting=2),
         action_converters=[BatchFIFO(),
                            ClosestOpenLocation(very_greedy=False),
                            ])
@@ -52,7 +52,7 @@ def get_episode_env(sim_parameters: SimulationParameters,
                     log_frequency: int, nr_zones: int, logfile_name: str,
                     log_dir='./result_data/', partitions=None):
     if partitions is None:
-        partitions = [0]
+        partitions = [13]
     seeds = [56513]
     return SlapEnv(
         sim_parameters, seeds, partitions,
@@ -63,7 +63,7 @@ def get_episode_env(sim_parameters: SimulationParameters,
             logfile_name=logfile_name), state_converter=FeatureConverterCharging(
             ["n_depleted_agvs", "avg_battery", "curr_agv_battery", "utilization",
              "queue_len_charging_station", "global_fill_level",
-             "queue_len_retrieval_orders", "queue_len_delivery_orders"]),
+             "queue_len_retrieval_orders", "queue_len_delivery_orders"], reward_setting=2),
         action_converters=[BatchFIFO(),
                            ClosestOpenLocation(very_greedy=False),
                            ])
@@ -78,7 +78,7 @@ def _init_run_loop(simulation_parameters, name, log_dir):
         sim_parameters=simulation_parameters,
         log_frequency=1000, nr_zones=3, log_dir=log_dir,
         #logfile_name=f'{name}_th{name}'
-        logfile_name=f'pt_{pt}_{name}_RL_thDQN')
+        logfile_name=f'pt_{pt}_{name}_RL_thSAC')
 
     loop_controls = LoopControl(environment, steps_per_episode=160)
     # state.state_cache.perform_sanity_check()
@@ -91,7 +91,7 @@ def run_episode(simulation_parameters: SimulationParameters,
                 charging_strategy: DQN,
                 print_freq=0,
                 log_dir='./result_data_charging_dqn/n_agvs__40/n_cs__4/dqn'):
-    name = "DQN"
+    name = "SAC"
     df_actions = pd.DataFrame(columns=["Step", "Action", "kpi__makespan"])
     env, loop_controls = _init_run_loop(
         simulation_parameters, name, log_dir)
@@ -141,7 +141,7 @@ def run_episode(simulation_parameters: SimulationParameters,
 if __name__ == '__main__':
     log_dir_init = './result_data_charging_wepa/init'
     log_dir = './result_data_charging_wepa'
-    logfile_name = f'DQN_wepastacks'
+    logfile_name = f'SAC_wepastacks'
 
     params = SimulationParameters(
         use_case="wepastacks_bm",
@@ -159,7 +159,7 @@ if __name__ == '__main__':
         unit_distance=1.4,
         pallet_shift_penalty_factor=20,  # in seconds
         compute_feature_trackers=True,
-        charging_thresholds=[40, 50, 60, 70, 80],
+        charging_thresholds=(40, 80),
     )
 
     env: SlapEnv = get_episode_env(
@@ -169,32 +169,26 @@ if __name__ == '__main__':
 
     net_arch = [125, 125]
     policy_kwargs = dict(net_arch=net_arch)
-    model = DQN("MlpPolicy", env,
-                learning_rate=0.00001,
-                buffer_size=5000,  # 500
-                learning_starts=120,
+    model = SAC("MlpPolicy",
+                env,
+                buffer_size=1000,  # 500
+                learning_starts=140,
                 batch_size=128,
-                tau=1,
                 gamma=0.99,
                 train_freq=(1, "step"),
                 gradient_steps=1,
                 replay_buffer_class=None,
                 replay_buffer_kwargs=None,
                 optimize_memory_usage=False,
-                target_update_interval=100,
-                exploration_fraction=0.33,  # 0.1
-                exploration_initial_eps=1.0,
-                exploration_final_eps=0.05,
-                max_grad_norm=10,
+                target_update_interval=1,
                 stats_window_size=100,
                 tensorboard_log="./dqn_charging_tensorboard/",
                 policy_kwargs=policy_kwargs,
                 verbose=2,
                 seed=None,
                 device='auto',
-                _init_setup_model=True,
+                _init_setup_model=True
                 )
-    # model = model.load("./model_r1_charging_wepaDQN_100000_128_0.33_256_256_100_1.zip", env=env)
     start = time.time()
     output_string = create_output_str(model, net_arch)
     # eval_env = deepcopy(env)
@@ -203,48 +197,47 @@ if __name__ == '__main__':
         logfile_name=logfile_name)
     
     eval_callback = EvalCallback(eval_env,
-                                 best_model_save_path="./logs/best_model/dqn/",
-                                 log_path="./logs/best_model/dqn/",
+                                 best_model_save_path="./logs/best_model/sac/",
+                                 log_path="./logs/best_model/sac/",
                                  eval_freq=1000,
                                  deterministic=True, render=False,
-                                 n_eval_episodes=2)
+                                 n_eval_episodes=1)
 
     checkpoint_callback = CheckpointCallback(
         save_freq=1000,
-        save_path="./logs/checkpoint/dqn/",
+        save_path="./logs/checkpoint/sac/",
         name_prefix="rl_model",
         save_replay_buffer=True,
         save_vecnormalize=True,
     )
 
-    # model.learn(total_timesteps=20000, progress_bar=False, log_interval=1,
-    #             callback=[eval_callback],
-    #             tb_log_name="R1_charging_wepa" + output_string)
-    # model.save(f"./model_r1_charging_wepa" + output_string + ".zip")
-    train_pt = "0_13"
-    model = model.load(f"./logs/best_model/dqn/pt{train_pt}_DQN5000_best_model.zip")
-    # model = model.load("./model_r1_charging_wepaDQN_100000_128_0.33_256_256_100_1.zip")
-    n_partitions = 20
-    for pt_idx in range(n_partitions):
-        params = SimulationParameters(
-            use_case="wepastacks_bm",
-            use_case_n_partitions=n_partitions,
-            use_case_partition_to_use=pt_idx,
-            n_agvs=40,
-            generate_orders=False,
-            verbose=False,
-            resetting=False,
-            initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
-            pure_lanes=True,
-            n_levels=3,
-            # https://logisticsinside.eu/speed-of-warehouse-trucks/
-            agv_speed=2,
-            unit_distance=1.4,
-            pallet_shift_penalty_factor=20,  # in seconds
-            compute_feature_trackers=True,
-            charging_thresholds=[40, 50, 60, 70, 80],
-        )
-        run_episode(simulation_parameters=params, charging_strategy=model,
-                    print_freq=100000,
-                    log_dir=f'./result_data_charging/val_dqn/{train_pt}')
+    model.learn(total_timesteps=20000, progress_bar=False, log_interval=1,
+                callback=[eval_callback, checkpoint_callback],
+                tb_log_name="R2_charging_wepa" + output_string)
+    model.save(f"./model_r2_charging_wepa" + output_string + ".zip")
+
+    # model = model.load("./model_r1_charging_wepaSAC_1000_128_256_256_1_0.005.zip")
+    # n_partitions = 20
+    # for pt_idx in range(n_partitions):
+    #     params = SimulationParameters(
+    #         use_case="wepastacks_bm",
+    #         use_case_n_partitions=n_partitions,
+    #         use_case_partition_to_use=pt_idx,
+    #         n_agvs=40,
+    #         generate_orders=False,
+    #         verbose=False,
+    #         resetting=False,
+    #         initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+    #         pure_lanes=True,
+    #         n_levels=3,
+    #         # https://logisticsinside.eu/speed-of-warehouse-trucks/
+    #         agv_speed=2,
+    #         unit_distance=1.4,
+    #         pallet_shift_penalty_factor=20,  # in seconds
+    #         compute_feature_trackers=True,
+    #         charging_thresholds=(40, 80),
+    #     )
+    #     run_episode(simulation_parameters=params, charging_strategy=model,
+    #                 print_freq=100000,
+    #                 log_dir=f'./result_data_charging/val_sac')
 

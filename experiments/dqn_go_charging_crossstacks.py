@@ -35,16 +35,17 @@ def get_episode_env(sim_parameters: SimulationParameters,
                     log_frequency: int, nr_zones: int, logfile_name: str,
                     log_dir='./result_data/'):
     seeds = [56513]
+    partitions = [None]
     return SlapEnv(
-        sim_parameters, seeds,
+        sim_parameters, seeds, partitions,
         logger=ExperimentLogger(
             filepath=log_dir,
             n_steps_between_saves=log_frequency,
             nr_zones=nr_zones,
             logfile_name=logfile_name), state_converter=FeatureConverterCharging(
             ["n_depleted_agvs", "avg_battery", "curr_agv_battery", "utilization",
-             "queue_len_charging_station",
-             "queue_len_retrieval_orders", "queue_len_delivery_orders"]),
+             "queue_len_charging_station", #"global_fill_level",
+             "queue_len_retrieval_orders", "queue_len_delivery_orders"], decision_mode="charging_check"),
         action_converters=[BatchFIFO(),
                            ClosestOpenLocation(very_greedy=False),
                            FixedChargePolicy(100)
@@ -89,6 +90,7 @@ def run_episode(simulation_parameters: SimulationParameters,
             state_repr = env.current_state_repr
             action = charging_strategy.predict(state_repr,
                                                       deterministic=True)
+            action = action[0].item()
         else:
             raise ValueError
         output, reward, loop_controls.done, info = env.step(action)
@@ -180,30 +182,30 @@ if __name__ == '__main__':
     output_string = create_output_str(model, net_arch)
     eval_env = deepcopy(env)
     eval_callback = EvalCallback(eval_env,
-                                 best_model_save_path="./logs/best_model/dqn/",
-                                 log_path="./logs/best_model/dqn/",
+                                 best_model_save_path="./logs/best_model/go_charging/cross/dqn/",
+                                 log_path="./logs/best_model/go_charging/cross/dqn/",
                                  eval_freq=100000,
                                  deterministic=True, render=False,
-                                 n_eval_episodes=2)
+                                 n_eval_episodes=1)
 
     checkpoint_callback = CheckpointCallback(
-        save_freq=1000,
-        save_path="./logs/checkpoint/dqn/",
+        save_freq=100000,
+        save_path="./logs/checkpoint/go_charging/cross/dqn/",
         name_prefix="rl_model",
         save_replay_buffer=True,
         save_vecnormalize=True,
     )
 
-    # model.learn(total_timesteps=10_000_000, progress_bar=False, log_interval=1,
-    #             callback=[eval_callback],
+    # model.learn(total_timesteps=6_000_000, progress_bar=False, log_interval=1,
+    #             callback=[eval_callback, checkpoint_callback],
     #             tb_log_name="R1_go_charging_cross" + output_string)
     # model.save(f"./model_r1_go_charging_cross" + output_string + ".zip")
 
-    model = model.load("./logs/best_model/dqn/best_model.zip")
+    # model = model.load("./logs/go_charging/pt13_DQN5000_best_model.zip")
 
     # model = DQN.load(f"./best_models/best_model/model_" + output_string + ".zip")
     # model = DQN.load(f"./best_models/best_model/model_DQN_1000_128_0.33_64_64_600_1" + ".zip")
-    # model = DQN.load("./model_DQN_6000_128_0.33_256_256_600_1.zip")
+    model = DQN.load(f"logs/go_charging/best_model/dqn/best_model.zip")
     # partitions = [0,1,2,3,4,5,6,7,8,9,10,11,12,14,15,16,17,18,19]
     # partitions = [19]
     #

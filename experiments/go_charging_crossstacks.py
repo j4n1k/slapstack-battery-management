@@ -37,7 +37,7 @@ def get_episode_env(sim_parameters: SimulationParameters,
             logfile_name=logfile_name),
         action_converters=[BatchFIFO(),
                            ClosestOpenLocation(very_greedy=False),
-                           FixedChargePolicy(70)])
+                           FixedChargePolicy(100)])
 
 
 def _init_run_loop(simulation_parameters,
