@@ -1,5 +1,5 @@
 defaults:
-  - model: dqn
+  - model: ppo
   - task: go_charging
   - sim_params: 4cs-40agv-20pt-wepa
   - _self_
@@ -13,7 +13,7 @@ experiment:
   t_pt: 13
   e_pt: 13
   n_cs: 4
-  id: 4cs-40agv-20pt-wepa
+  id: 1cs-20agv-1pt-cross
 
 evaluation:
   eval_partitions: [13]

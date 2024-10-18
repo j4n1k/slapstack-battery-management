@@ -47,8 +47,7 @@ def get_env(sim_parameters: SimulationParameters,
                                  ]
             feature_list = ["n_depleted_agvs", "avg_battery", "utilization",
                  "queue_len_charging_station", "global_fill_level", "curr_agv_battery",
-                 "dist_to_cs", "time_next_event",
-                 "queue_len_retrieval_orders", "queue_len_delivery_orders"]
+                 "dist_to_cs", "queue_len_retrieval_orders", "queue_len_delivery_orders"]
             decision_mode = "charging_check"
         else:
             action_converters = [BatchFIFO(),
@@ -104,7 +103,7 @@ def run_episode(simulation_parameters: SimulationParameters,
     #df_actions = pd.DataFrame(columns=["Step", "Action", "kpi__makespan"])
     df_actions = pd.DataFrame()
     env, loop_controls = _init_run_loop(
-        simulation_parameters, name, log_dir, state_converter, cfg)
+        simulation_parameters, name, log_dir, cfg, state_converter)
     loop_controls.state = env.core_env.state
     pt_idx = simulation_parameters.use_case_partition_to_use
     parametrization_failure = False
@@ -124,9 +123,10 @@ def run_episode(simulation_parameters: SimulationParameters,
             state_repr = env.current_state_repr
             action = model.predict(state_repr,
                                    deterministic=True)
+            # action = action[0].item()
         else:
             raise ValueError
-        output, reward, loop_controls.done, info = env.step(action)
+        output, reward, loop_controls.done, info = env.step(action[0].item())
         if print_freq and loop_controls.n_decisions % print_freq == 0:
             ExperimentLogger.print_episode_info(
                 name, start, loop_controls.n_decisions,
@@ -157,7 +157,7 @@ def run_episode(simulation_parameters: SimulationParameters,
         if isinstance(model, SAC):
             action = action.item()
         elif isinstance(model, DQN):
-            action = cfg.task.task.charging_thresholds[action.item()]
+            action = cfg.task.task.charging_thresholds[action[0].item()]
         else:
             action = cfg.model.agent.model_params.threshold
         writer.add_scalar(f'Evaluation/{pt_idx}/Action', action)

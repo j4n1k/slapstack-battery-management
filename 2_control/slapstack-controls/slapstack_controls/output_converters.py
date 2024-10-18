@@ -345,11 +345,17 @@ class FeatureConverterCharging(OutputConverter):
     @staticmethod
     def f_get_curr_agv_battery(state: State):
         agv_id = state.current_agv
-        if not agv_id:
+        if agv_id == None:
             return 0
         else:
             agvm = state.agv_manager
             agv = agvm.agv_index[agv_id]
+            try:
+                assert agv.battery >= 20
+            except:
+                print()
+            if agv.battery == 0:
+                print()
             return agv.battery / 100
 
     @staticmethod
@@ -374,7 +380,7 @@ class FeatureConverterCharging(OutputConverter):
     @staticmethod
     def f_get_dist_to_cs(state: State):
         agv_id = state.current_agv
-        if not agv_id:
+        if agv_id == None:
             return 0
         agv = state.agv_manager.agv_index[agv_id]
         agv_position = agv.position
@@ -386,7 +392,7 @@ class FeatureConverterCharging(OutputConverter):
             )
             if d < min_distance:
                 min_distance = d
-        return min_distance
+        return min_distance / state.agv_manager.router.max_distance
 
     @staticmethod
     def f_get_state_time(state: State):

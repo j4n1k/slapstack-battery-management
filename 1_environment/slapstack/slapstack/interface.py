@@ -1,7 +1,7 @@
 import heapq as heap
 from typing import Union, List
 
-import gym
+import gymnasium as gym
 from copy import deepcopy
 import numpy as np
 
@@ -41,7 +41,7 @@ class SlapEnv(gym.Env):
             init_partition = None
         self.__env_input = Input(environment_parameters, init_seed, init_partition)
         self.__core = SlapCore(deepcopy(self.__env_input), logger)
-        self.__core.reset()
+        self.__core.reset(None)
         self.__output_converter = state_converter
         self.feature_list = state_converter.feature_list
         self.__strategy_configuration = -1
@@ -123,7 +123,7 @@ class SlapEnv(gym.Env):
         if self.autoplay() and not done:
             # state_repr, reward, done = self.__skip_fixed_decisions(done)
             state_repr, _, done = self.__skip_fixed_decisions(done)
-        return state_repr, reward, done, {}
+        return state_repr, reward, done, False, {}
 
     def test_sameSKU(self):
         for aisle in self.__core.state.state_cache.lane_manager.lane_index:
@@ -181,7 +181,7 @@ class SlapEnv(gym.Env):
             else:
                 return [i for i in range(n_rs)]
 
-    def reset(self):
+    def reset(self, seed=None, options=None):
         # self.__core = SlapCore(self.__env_input)
         # seed cycling if seeds were passed
         if ((bool(self.__seeds_remaining) or bool(self.__seeds_used)) or
@@ -205,19 +205,20 @@ class SlapEnv(gym.Env):
         else:
             self.__env_input = Input(self.__env_input.params)
         self.__core = SlapCore(self.__env_input, self.__core.logger)
-        self.__core.reset()
+        self.__core.reset(None)
         if self.autoplay():
             self.__skip_fixed_decisions(False)
         if self.__output_converter is not None:
             self.__output_converter.reset()
             return self.__output_converter.modify_state(
-                self.__core.state)
+                self.__core.state), None
         else:
             return self.__core.state
 
     def __skip_fixed_decisions(self, done):
         state_repr, reward = None, 0
         while self.autoplay() and not done:
+            # self.core_env.state.current_agv = self.core_env.previous_event.agv_id
             if self.__core.state.current_order == "delivery":
                 action = self.__storage_strategies[0].get_action(
                     self.__core.state)
@@ -268,7 +269,7 @@ class SlapEnv(gym.Env):
             #     assert state_repr.shape == (900, )
         if self.__core.decision_mode == "charging" or self.__core.decision_mode == "charging_check":
             self.current_state_repr = state_repr
-            self.core_env.state.current_agv = self.core_env.previous_event.agv.id
+            # self.core_env.state.current_agv = self.core_env.previous_event.agv.id
         return state_repr, reward, done
 
     def autoplay(self):
@@ -377,7 +378,7 @@ class SlapEnv(gym.Env):
                 low, high = self.__core.inpt.params.charging_thresholds
                 self.action_space = gym.spaces.Box(low=low, high=high)
             else:
-                self.action_space = gym.spaces.Discrete(2)
+                self.action_space = gym.spaces.discrete.Discrete(2)
         else:  # self.__strategy_configuration == 8:
             self.action_space = gym.spaces.Discrete(n_ss + n_rs)
 
@@ -555,9 +556,13 @@ class SlapEnv(gym.Env):
         agv_id = state.current_agv
         agv = state.agv_manager.agv_index[agv_id]
         battery_level = agv.battery
-        charging_thresholds = np.array(state.params.charging_thresholds)
-        mask = (charging_thresholds == 0) | (charging_thresholds > battery_level)
-        return mask
+        # charging_thresholds = np.array(state.params.charging_thresholds)
+        # mask = (charging_thresholds == 0) | (charging_thresholds > battery_level)
+        mask = [1, 1]
+        # If battery level is below 20%, action 0 (Don't charge) is invalid
+        if battery_level < 20:
+            mask[0] = 0
+        return np.array(mask)
 
     # </editor-fold>
 

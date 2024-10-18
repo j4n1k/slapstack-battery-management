@@ -1,7 +1,7 @@
 import time
 from typing import Tuple, List, Any, Union
 
-import gym
+import gymnasium as gym
 import numpy as np
 from slapstack.core_events import (Retrieval, RetrievalFirstLeg,
                                    DeliverySecondLeg, Travel, Delivery, Event,
@@ -245,7 +245,7 @@ class SlapCore(gym.Env):
     #     """
     #     self.storage_matrix_history.append(self.state.S)
 
-    def reset(self):
+    def reset(self, seed):
         """this function should be called to initialize and/or reset the
         slap environment to its initial state. It initializes inpt,
         adds initial pallets, creates orders, logs states. Lastly, it executes
@@ -415,6 +415,8 @@ class SlapCore(gym.Env):
             self.events.add_future_event(event)
         self.logger.log_state()
         done_prematurely = self.step_no_action()
+        if hasattr(self.previous_event, "agv_id"):
+            self.state.current_agv = self.previous_event.agv_id
         return self.__has_ended(done_prematurely)
 
     def __has_ended(self, done_prematurely: bool) -> (State, bool):
@@ -574,6 +576,10 @@ class SlapCore(gym.Env):
 
         elif action == 0:
             agv = prev_e.agv
+            try:
+                assert agv.battery >= 20
+            except:
+                print()
             self.state.agv_manager.release_agv(prev_e.last_node, self.state.time, agv.id)
             travel_event = Relocation(self.state, prev_e.last_node, agv.id)
         assert travel_event

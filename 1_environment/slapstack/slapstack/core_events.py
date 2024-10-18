@@ -1035,6 +1035,7 @@ class GoChargingCheck(Event):
     def __init__(self, time: float, state: 'State', start_point: Tuple[int, int],
                  agv_id: int, core):
         super().__init__(time=time, verbose=False)
+        self.agv_id = agv_id
         locs = state.agv_manager.get_agv_locations()
         idx = 0
         target_idx = None

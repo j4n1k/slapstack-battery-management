@@ -12,7 +12,10 @@ class WandbCallback(BaseCallback):
 
     def _on_step(self):
         super()._on_step()
-        training_env = self.model.get_env().envs[0].env.unwrapped.gym_env
+        try:
+            training_env = self.model.get_env().envs[0].env.unwrapped.gym_env
+        except AttributeError:
+            training_env = self.model.get_env().envs[0].env.unwrapped
         action = training_env.last_action_taken
 
         log_dict = {}
@@ -21,6 +24,8 @@ class WandbCallback(BaseCallback):
         observation = obs_as_tensor(observation, self.model.device)
         feature_list = training_env.feature_list
         log_dict.update({f"observations/{f}": observation[0][i].item() for i, f in enumerate(feature_list)})
+        if observation[0][5].item() == 0:
+            print()
         if isinstance(self.model, DQN):
             with th.no_grad():
                 q_values = self.model.q_net(observation)
