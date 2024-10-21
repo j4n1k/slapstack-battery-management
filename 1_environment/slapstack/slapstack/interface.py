@@ -43,7 +43,9 @@ class SlapEnv(gym.Env):
         self.__core = SlapCore(deepcopy(self.__env_input), logger)
         self.__core.reset(None)
         self.__output_converter = state_converter
-        self.feature_list = state_converter.feature_list
+
+        if state_converter:
+            self.feature_list = state_converter.feature_list
         self.__strategy_configuration = -1
         self.__storage_strategies = None
         self.__retrieval_strategies = None

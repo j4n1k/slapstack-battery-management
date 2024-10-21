@@ -129,10 +129,10 @@ def get_charging_strategies():
         # FixedChargePolicy(40),
         # FixedChargePolicy(50),
         # FixedChargePolicy(60),
-        FixedChargePolicy(70),
+        # FixedChargePolicy(70),
         # FixedChargePolicy(80),
         # FixedChargePolicy(90),
-        # FixedChargePolicy(100),
+        FixedChargePolicy(100),
         # RandomChargePolicy([40, 50, 60, 70, 80], 1)
     ]
 
@@ -174,7 +174,7 @@ charging_strategies = get_charging_strategies()
 
 params = SimulationParameters(
                 use_case="wepastacks_bm",
-                use_case_n_partitions=20,
+                use_case_n_partitions=1,
                 use_case_partition_to_use=0,
                 n_agvs=40,
                 generate_orders=False,

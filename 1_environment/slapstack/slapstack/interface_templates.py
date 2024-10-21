@@ -50,7 +50,7 @@ class ChargingStrategy:
 
 
 class OutputConverter:
-    def __init__(self, feature_list):
+    def __init__(self, feature_list=None):
         self.feature_list = feature_list
     def modify_state(self, state: 'State') -> np.ndarray:
         pass

@@ -126,7 +126,7 @@ def run_episode(simulation_parameters: SimulationParameters,
             # action = action[0].item()
         else:
             raise ValueError
-        output, reward, loop_controls.done, info = env.step(action[0].item())
+        output, reward, loop_controls.done, info, _ = env.step(action[0].item())
         if print_freq and loop_controls.n_decisions % print_freq == 0:
             ExperimentLogger.print_episode_info(
                 name, start, loop_controls.n_decisions,
@@ -153,13 +153,13 @@ def run_episode(simulation_parameters: SimulationParameters,
         writer.add_scalar(f'Evaluation/{pt_idx}/N_Charging_Events', sum(len(lst) for lst in am.queued_charging_events.values()), pt_idx)
         writer.add_scalar(f'Evaluation/{pt_idx}/N_Retrieval_Orders', s.trackers.n_queued_retrieval_orders, pt_idx)
         writer.add_scalar(f'Evaluation/{pt_idx}/N_Depleted_AGV', am.get_n_depleted_agvs(), pt_idx)
-
-        if isinstance(model, SAC):
-            action = action.item()
-        elif isinstance(model, DQN):
-            action = cfg.task.task.charging_thresholds[action[0].item()]
-        else:
-            action = cfg.model.agent.model_params.threshold
+        action = action[0].item()
+        # if isinstance(model, SAC):
+        #     action = action.item()
+        # elif isinstance(model, DQN):
+        #     action = cfg.task.task.charging_thresholds[action[0].item()]
+        # else:
+        #     action = cfg.model.agent.model_params.threshold
         writer.add_scalar(f'Evaluation/{pt_idx}/Action', action)
 
         df_actions = pd.concat([df_actions, action_taken])
@@ -217,8 +217,8 @@ def run_evaluation_tensorboard(cfg, model, storage_strategy, state_converter=Tru
         # writer.add_scalar('Evaluation/N_Retrieval_Orders', episode_results['n_queued_retrieval_orders'], pt_idx)
 
         # Log action distribution
-        action_counts = np.bincount(episode_results['Action'])
-        writer.add_histogram('Evaluation/Action_Distribution', action_counts, pt_idx)
+        # action_counts = np.bincount(episode_results['Action'])
+        # writer.add_histogram('Evaluation/Action_Distribution', action_counts, pt_idx)
         reward += episode_results["kpi__average_service_time"]
 
     writer.close()
@@ -340,7 +340,8 @@ def main(cfg: DictConfig):
                 _init_setup_model=True)
     elif cfg.model.agent.name == "PPO":
         env = ActionMasker(env, mask_fn)
-        model = MaskablePPO(MaskableActorCriticPolicy, env, verbose=1, tensorboard_log="./dqn_charging_tensorboard/")
+        model = MaskablePPO(MaskableActorCriticPolicy, env, verbose=1, tensorboard_log="./dqn_charging_tensorboard/",
+                            device="cpu")
     elif cfg.model.agent.name == "Threshold":
         model = FixedChargePolicy(charging_threshold=cfg.model.agent.model_params.threshold)
     else:
@@ -370,24 +371,23 @@ def main(cfg: DictConfig):
     )
     # Train the model
     if cfg.model.agent.name != "Threshold":
-        model.learn(
-            total_timesteps=cfg.experiment.total_timesteps,
-            callback=[checkpoint_callback, wandb_callback, eval_callback],
-            progress_bar=False,
-            log_interval=1,
-            tb_log_name=f"{cfg.experiment.name}_{cfg.model.agent.name}_{cfg.experiment.id}"
-        )
-
-        # Save the final model
-        model.save(f"{cfg.experiment.log_dir}_final_model_{cfg.model.agent.name}_{cfg.experiment.id}.zip")
+        # model.learn(
+        #     total_timesteps=cfg.experiment.total_timesteps,
+        #     callback=[checkpoint_callback, wandb_callback, eval_callback],
+        #     progress_bar=False,
+        #     log_interval=1,
+        #     tb_log_name=f"{cfg.experiment.name}_{cfg.model.agent.name}_{cfg.experiment.id}"
+        # )
+        # model.save(f"{cfg.experiment.log_dir}/final_model_{cfg.model.agent.name}_{cfg.experiment.id}.zip")
 
         # Run evaluation episode
-        best_model = model.load(os.path.join(best_model_path, "best_util_reward.zip"))
+        best_model = model.load(os.path.join(best_model_path, "best_model"))
 
         mean_eval_reward = run_evaluation_tensorboard(cfg, best_model, storage_strategy)
     else:
         mean_eval_reward = run_evaluation_tensorboard(cfg, model, storage_strategy, state_converter=False)
     wandb.finish()
+    print(mean_eval_reward)
     return mean_eval_reward
 
 

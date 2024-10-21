@@ -1,7 +1,7 @@
 defaults:
-  - model: ppo
+  - model: th_100
   - task: go_charging
-  - sim_params: 4cs-40agv-20pt-wepa
+  - sim_params: 4cs-40agv-1pt-wepa
   - _self_
 
 experiment:
@@ -10,11 +10,11 @@ experiment:
   total_timesteps: 2000000
   eval_freq: 60000
   n_eval_episodes: 1
-  t_pt: 13
-  e_pt: 13
+  t_pt:
+  e_pt: 0
   n_cs: 4
-  id: 1cs-20agv-1pt-cross
+  id: 1cs-20agv-1pt-cross-ppo-1reward-eval
 
 evaluation:
-  eval_partitions: [13]
+  eval_partitions: [0]
 
