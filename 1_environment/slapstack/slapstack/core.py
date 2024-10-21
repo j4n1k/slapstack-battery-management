@@ -546,7 +546,7 @@ class SlapCore(gym.Env):
                                          action: int):
         prev_e = self.previous_event
         travel_event = None
-        if action == 1:
+        if action != 0:
             #agv: AGV = self.state.agv_manager.agv_index[prev_e.agv_id]
             agv = prev_e.agv
             agvm = self.state.agv_manager
@@ -571,15 +571,15 @@ class SlapCore(gym.Env):
                 order=dummy_charging_order,
                 agv_id=agv.id,
                 core=self.events,
-                # fixed_charging_duration=charging_duration
+                fixed_charging_duration=action
             )
 
         elif action == 0:
             agv = prev_e.agv
             try:
-                assert agv.battery >= 20
-            except:
-                print()
+                assert agv.battery >= 0, "Battery below or equal to 0%"
+            except AssertionError:
+                print("Error")
             self.state.agv_manager.release_agv(prev_e.last_node, self.state.time, agv.id)
             travel_event = Relocation(self.state, prev_e.last_node, agv.id)
         assert travel_event

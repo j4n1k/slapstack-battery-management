@@ -9,6 +9,7 @@ from typing import Dict
 import pandas as pd
 import numpy as np
 from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
+
 from sb3_contrib.common.wrappers import ActionMasker
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
 from stable_baselines3 import DQN, SAC
@@ -16,8 +17,7 @@ from sb3_contrib import MaskablePPO
 from torch.utils.tensorboard import SummaryWriter
 import wandb
 # from wandb.integration.sb3 import WandbCallback
-from custom_callbacks import WandbCallback
-
+from custom_callbacks import WandbCallback, MaskableEvalCallback
 
 from experiment_commons import (ExperimentLogger, LoopControl,
                                 create_output_str, count_charging_stations, delete_prec_dima, gen_charging_stations,
@@ -340,6 +340,7 @@ def main(cfg: DictConfig):
                 _init_setup_model=True)
     elif cfg.model.agent.name == "PPO":
         env = ActionMasker(env, mask_fn)
+        eval_env = ActionMasker(eval_env, mask_fn)
         model = MaskablePPO(MaskableActorCriticPolicy, env, verbose=1, tensorboard_log="./dqn_charging_tensorboard/",
                             device="cpu")
     elif cfg.model.agent.name == "Threshold":
@@ -348,15 +349,28 @@ def main(cfg: DictConfig):
         raise ValueError(f"Unknown model: {cfg.model.agent.name}")
 
     # Set up callbacks
-    eval_callback = EvalCallback(
-        eval_env,
-        best_model_save_path=best_model_path,
-        log_path=os.path.join(cfg.experiment.log_dir, "eval"),
-        eval_freq=cfg.experiment.eval_freq,
-        deterministic=True,
-        render=False,
-        n_eval_episodes=cfg.experiment.n_eval_episodes
-    )
+    if isinstance(env, ActionMasker):
+        # evaluate_policy(model, env, n_eval_episodes=20, warn=False)
+        eval_callback = MaskableEvalCallback(
+            eval_env,
+            best_model_save_path=best_model_path,
+            log_path=os.path.join(cfg.experiment.log_dir, "eval"),
+            eval_freq=cfg.experiment.eval_freq,
+            deterministic=True,
+            render=False,
+            n_eval_episodes=cfg.experiment.n_eval_episodes
+        )
+    else:
+        eval_callback = EvalCallback(
+            eval_env,
+            best_model_save_path=best_model_path,
+            log_path=os.path.join(cfg.experiment.log_dir, "eval"),
+            eval_freq=cfg.experiment.eval_freq,
+            deterministic=True,
+            render=False,
+            n_eval_episodes=cfg.experiment.n_eval_episodes
+        )
+
 
     checkpoint_callback = CheckpointCallback(
         save_freq=1000,
@@ -371,14 +385,14 @@ def main(cfg: DictConfig):
     )
     # Train the model
     if cfg.model.agent.name != "Threshold":
-        # model.learn(
-        #     total_timesteps=cfg.experiment.total_timesteps,
-        #     callback=[checkpoint_callback, wandb_callback, eval_callback],
-        #     progress_bar=False,
-        #     log_interval=1,
-        #     tb_log_name=f"{cfg.experiment.name}_{cfg.model.agent.name}_{cfg.experiment.id}"
-        # )
-        # model.save(f"{cfg.experiment.log_dir}/final_model_{cfg.model.agent.name}_{cfg.experiment.id}.zip")
+        model.learn(
+            total_timesteps=cfg.experiment.total_timesteps,
+            callback=[checkpoint_callback, wandb_callback, eval_callback],
+            progress_bar=False,
+            log_interval=1,
+            tb_log_name=f"{cfg.experiment.name}_{cfg.model.agent.name}_{cfg.experiment.id}"
+        )
+        model.save(f"{cfg.experiment.log_dir}/final_model_{cfg.model.agent.name}_{cfg.experiment.id}.zip")
 
         # Run evaluation episode
         best_model = model.load(os.path.join(best_model_path, "best_model"))

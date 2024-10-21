@@ -353,7 +353,7 @@ class FeatureConverterCharging(OutputConverter):
             try:
                 assert agv.battery >= 20
             except:
-                print()
+                print(f"Error in Converter: Battery below Threshold: {agv.battery} ")
             if agv.battery == 0:
                 print()
             return agv.battery / 100

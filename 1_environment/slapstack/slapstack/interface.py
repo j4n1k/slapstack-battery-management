@@ -375,11 +375,16 @@ class SlapEnv(gym.Env):
         elif self.__strategy_configuration == 7:
             self.action_space = gym.spaces.Discrete(n_ss)
         elif self.__strategy_configuration == 9:
-            # Go to charging -> binary decision
             if isinstance(self.__core.inpt.params.charging_thresholds, tuple):
+                # not used right now
                 low, high = self.__core.inpt.params.charging_thresholds
                 self.action_space = gym.spaces.Box(low=low, high=high)
+            if isinstance(self.__core.inpt.params.charging_thresholds, list):
+                # combined go charging and charging duration decision
+                n_thresholds = len(self.__core.inpt.params.charging_thresholds)
+                self.action_space = gym.spaces.Discrete(n_thresholds)
             else:
+                # Go to charging -> binary decision
                 self.action_space = gym.spaces.discrete.Discrete(2)
         else:  # self.__strategy_configuration == 8:
             self.action_space = gym.spaces.Discrete(n_ss + n_rs)
@@ -492,7 +497,21 @@ class SlapEnv(gym.Env):
             return self.__storage_strategies[0].get_action(self.__core.state)
         elif self.__core.decision_mode == "charging_check":
             # return agent_action[0].item()
-            return agent_action
+            if len(self.__core.inpt.params.charging_thresholds) > 2:
+                if agent_action == 0:
+                    return agent_action
+                #     print()
+                threshold = self.env_input.params.charging_thresholds[
+                    agent_action]
+                agv_id = self.core_env.previous_event.agv_id
+                agvm = self.core_env.state.agv_manager
+                agv = self.core_env.state.agv_manager.agv_index[agv_id]
+                charge_to_full = threshold - agv.battery
+                charging_duration = charge_to_full / agvm.charging_rate
+                # charging_duration = threshold / agvm.charging_rate
+                return charging_duration
+            elif len(self.__core.inpt.params.charging_thresholds) == 2:
+                return agent_action
         else:
             return self.__retrieval_strategies[0].get_action(self.__core.state)
 
@@ -558,13 +577,24 @@ class SlapEnv(gym.Env):
         agv_id = state.current_agv
         agv = state.agv_manager.agv_index[agv_id]
         battery_level = agv.battery
-        # charging_thresholds = np.array(state.params.charging_thresholds)
-        # mask = (charging_thresholds == 0) | (charging_thresholds > battery_level)
-        mask = [1, 1]
-        # If battery level is below 20%, action 0 (Don't charge) is invalid
-        if battery_level < 20:
-            mask[0] = 0
-        return np.array(mask)
+        charging_thresholds = np.array(state.params.charging_thresholds)
+        if self.action_space.n == 2:
+            mask = [1, 1]
+            if battery_level < 20:
+                # If battery level is below 20%, action 0 (Don't charge) is invalid
+                mask[0] = 0
+            return np.array(mask)
+        else:
+            mask = charging_thresholds > battery_level
+            if battery_level <= 20:
+                mask[0] = False
+            else:
+                mask[0] = True
+            try:
+                assert battery_level >= 0
+            except:
+                print("Error in mask")
+            return mask
 
     # </editor-fold>
 

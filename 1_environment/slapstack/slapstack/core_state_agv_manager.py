@@ -483,7 +483,7 @@ class AgvManager:
         try:
             assert agv.battery <= 100
         except:
-            print()
+            print("Battery over 100%")
 
     def deplete_battery(self, t, loaded: bool, agv_id: int):
         agv = self.agv_index[agv_id]
