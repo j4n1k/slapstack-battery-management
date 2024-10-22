@@ -101,10 +101,12 @@ class SimulationParameters:
                  battery_consumption_loaded_h: float = 20,  # 15
                  battery_charging_h: float = 80,  # 80
                  charging_thresholds: Union[list[int], Tuple[float, float]] = None,
+                 charge_during_breaks: bool = True
                  ):
 
         # The inpt that are not required when usecase is provided.
         # https://www.kuka.com/en-de/products/mobility/mobile-platforms/kmp-1500
+        self.charge_during_breaks = charge_during_breaks
         self.battery_charging_h = battery_charging_h
         self.battery_consumption_h = battery_consumption_h
         self.battery_consumption_loaded_h = battery_consumption_loaded_h

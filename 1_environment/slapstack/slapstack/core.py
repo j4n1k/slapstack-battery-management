@@ -91,6 +91,7 @@ class SlapCore(gym.Env):
             first value in state_stack
         logger: Logger
         """
+        self.charge_during_breaks = usr_inpt.params.charge_during_breaks
         self.inpt = usr_inpt
         self.rng = None
         self.partition = None
@@ -245,7 +246,7 @@ class SlapCore(gym.Env):
     #     """
     #     self.storage_matrix_history.append(self.state.S)
 
-    def reset(self, seed):
+    def reset(self, seed=None, options=None):
         """this function should be called to initialize and/or reset the
         slap environment to its initial state. It initializes inpt,
         adds initial pallets, creates orders, logs states. Lastly, it executes
@@ -296,6 +297,21 @@ class SlapCore(gym.Env):
                and (e.running or retrieval_ok or delivery_ok)):
             self.print("~" * 150 + "\n" + "step no action \n" + "~" * 150)
             s.time_to_next_event = self.peek_next_event_time()
+            if self.charge_during_breaks:
+                charge_time_check = self.time_check_charging()
+                if charge_time_check:
+                    action_needed_last_main_event = None
+                    agvm = self.state.agv_manager
+                    if agvm.charge_in_break_started == False:
+                        # agvm.first_charge_during_break = True
+                        agvm.charge_in_break_started = True
+                        while e.current_travel:
+                            event_to_finish_popped = e.pop_future_event()
+                            action_needed_last_main_event = self.handle_event_and_update_env(
+                                event_to_finish_popped)
+                        if not action_needed_last_main_event:
+                            self.perform_charging_during_break()
+
             next_event = None
             # if there are serviceable queued events, take care of them first.
             if (retrieval_ok or delivery_ok) and\
@@ -309,6 +325,9 @@ class SlapCore(gym.Env):
             sc.invalidate_sku_location_cache()
             retrieval_ok = e.available_retrieval(s)
             delivery_ok = e.available_delivery(s)
+        if self.state.agv_manager.charge_in_break_started:
+            if self.state.time >= self.state.agv_manager.time_of_next_main_event:
+                self.state.agv_manager.charge_in_break_started = False
         if not e.all_orders_complete():
             # update legal actions for next step()
             self.legal_actions = self.get_legal_actions()
@@ -324,6 +343,24 @@ class SlapCore(gym.Env):
         next_event_peek_time = s.next_main_event_time
         time_delta = next_event_peek_time - state_time
         return time_delta
+
+    def time_check_charging(self):
+        s, e = self.state, self.events
+        next_event_peek = e.running[0]
+        state_time = s.time
+        s.set_main_event_time(next_event_peek)
+        next_event_peek_time = s.next_main_event_time
+        time_delta = next_event_peek_time - state_time
+        # if time_delta > self.rs_manager.highest_time_delta:
+        #    self.rs_manager.highest_time_delta = time_delta
+        max_duration = self.state.agv_manager.max_charging_time_frame
+        if (time_delta > max_duration) and (state_time != 0):
+            if self.state.agv_manager.charge_in_break_started == False:
+                self.state.agv_manager.full_time_delta = time_delta
+                self.state.agv_manager.time_of_next_main_event = next_event_peek_time
+            return True
+        else:
+            return False
 
     # @profile
     def handle_event_and_update_env(self, next_event: Event) -> bool:
@@ -550,12 +587,12 @@ class SlapCore(gym.Env):
             #agv: AGV = self.state.agv_manager.agv_index[prev_e.agv_id]
             agv = prev_e.agv
             agvm = self.state.agv_manager
-            agv.scheduled_charging = False
+            # agv.scheduled_charging = False
             cs = self.state.agv_manager.get_charging_station(agv.position, None)
-            # left_to_full = 100 - agv.battery
+            left_to_full = 70 - agv.battery
             # charging_duration = None
-            # if 0 < action <= 1:
-            #     charging_duration = left_to_full / agvm.charging_rate
+            if 0 < action <= 1:
+                action = left_to_full / agvm.charging_rate
             #     charging_duration = charging_duration * action
             ChargingFirstLeg.charging_nr += 1
             dummy_charging_order = Order(
@@ -876,6 +913,127 @@ class SlapCore(gym.Env):
 
     def __deepcopy__(self, memo):
         return faster_deepcopy(self, memo)
+
+    def greedy_charging_selection(self):
+        agvm = self.state.agv_manager
+        charging_durations = []
+        contribution = []
+        for agv_idx in self.state.agv_manager.agv_index:
+            agv = self.state.agv_manager.agv_index[agv_idx]
+            charge_to_full = 100 - agv.battery
+            contribution.append(charge_to_full)
+            charging_duration = (charge_to_full /
+                                 self.state.agv_manager.charging_rate)
+            approx_dist = agvm.router.get_distance(
+                agv.position,
+                self.state.agv_manager.charging_stations[0])
+            charging_durations.append(charging_duration + approx_dist)
+        agv_ids = [i for i in range(agvm.n_agvs)]
+        mapping = np.array(
+            [agv_ids, charging_durations])
+        sorted_agv_idx = -np.argsort(-mapping[1]) * -1
+        durations_sorted = mapping[1][sorted_agv_idx]
+        max_capacity = agvm.time_of_next_main_event - self.state.time
+        if sum(charging_durations) <= max_capacity * agvm.n_charging_stations:
+            partitions = np.split(sorted_agv_idx, agvm.n_charging_stations)
+            for cs in range(agvm.n_charging_stations):
+                for agv_id in partitions[cs]:
+                    if self.state.agv_manager.agv_index[agv_id].free:
+                        agvm.agv_index[agv_id].scheduled_charging = True
+                        next_event = self.__create_charging_travel_event_during_break(
+                            agvm.agv_index[agv_id], agvm.charging_stations[cs])
+                        self.state.add_travel_event(next_event)
+                        self.events.add_travel_event(next_event)
+        else:
+            for cs in range(agvm.n_charging_stations):
+                cumsum = np.cumsum(durations_sorted)
+                idx_to_take = np.where(cumsum <= max_capacity)
+                agvs_to_take = sorted_agv_idx[idx_to_take]
+                for agv_id in agvs_to_take:
+                    if self.state.agv_manager.agv_index[agv_id].free:
+                        agvm.agv_index[agv_id].scheduled_charging = True
+                        next_event = self.__create_charging_travel_event_during_break(
+                            agvm.agv_index[agv_id], agvm.charging_stations[cs])
+                        self.state.add_travel_event(next_event)
+                        self.events.add_travel_event(next_event)
+                last_el = np.where(cumsum > max_capacity)[0][0]
+                sorted_agv_idx = sorted_agv_idx[last_el:]
+                durations_sorted = durations_sorted[last_el:]
+
+    def perform_battery_sort(self):
+        # prefers agvs with the lowest battery level
+        agvm = self.state.agv_manager
+        while agvm.n_free_agvs:
+            lowest_battery = np.inf
+            idx = None
+            for agv in agvm.agv_index:
+                if (agvm.agv_index[agv].battery < lowest_battery and
+                        agvm.agv_index[agv].free):
+                    idx = agvm.agv_index[agv].id
+                    lowest_battery = agvm.agv_index[agv].battery
+            agv = agvm.agv_index[idx]
+            agv.scheduled_charging = True
+            threshold = 100
+            agv_id = agv.id
+            agvm = self.state.agv_manager
+            agv = self.state.agv_manager.agv_index[agv_id]
+            charge_to_full = threshold - agv.battery
+            fixed_charging_duration = charge_to_full / agvm.charging_rate
+            next_event = self.__create_charging_travel_event_during_break(
+                agv, fixed_charging_duration)
+            self.state.add_travel_event(next_event)
+            self.events.add_travel_event(next_event)
+            assert next_event.order.order_number in self.state.travel_events.keys()
+
+    def schedule_charging(self):
+        agvm = self.state.agv_manager
+        while agvm.n_free_agvs:
+            idx = None
+            for agv in agvm.agv_index:
+                idx = agvm.agv_index[agv].id
+                agvm.agv_index[0].scheduled_charging = True
+                agv = agvm.agv_index[0]
+                threshold = 80
+                agv_id = agv.id
+                agvm = self.state.agv_manager
+                agv = self.state.agv_manager.agv_index[agv_id]
+                charge_to_full = threshold - agv.battery
+                fixed_charging_duration = charge_to_full / agvm.charging_rate
+                next_event = self.__create_charging_travel_event_during_break(agv, fixed_charging_duration)
+                self.state.add_travel_event(next_event)
+            self.events.add_travel_event(next_event)
+
+    def perform_charging_during_break(self):
+        self.perform_battery_sort()
+        # self.greedy_charging_selection()
+        # self.schedule_charging()
+
+    def __create_charging_travel_event_during_break(self, agv: AGV, action: float):
+        cs = self.state.agv_manager.get_charging_station(agv.position, self)
+        # threshold = 80
+        # agv_id = agv.id
+        # agvm = self.state.agv_manager
+        # agv = self.state.agv_manager.agv_index[agv_id]
+        # charge_to_full = threshold - agv.battery
+        # fixed_charging_duration = charge_to_full / agvm.charging_rate
+        ChargingFirstLeg.charging_nr += 1
+        dummy_charging_order = Order(
+            -np.infty, -999, ChargingFirstLeg.charging_nr, -999, False)
+
+        travel_event = ChargingFirstLeg(
+            state=self.state,
+            start_point=agv.position,
+            end_point=(cs[0], cs[1]),
+            travel_type="charging_first_leg",
+            level=0,
+            # source=0,
+            orders=None,
+            order=dummy_charging_order,
+            agv_id=agv.id,
+            core=self,
+            fixed_charging_duration=action)
+
+        return travel_event
 
 
 class SlapOrders:

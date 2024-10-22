@@ -115,7 +115,7 @@ class SlapEnv(gym.Env):
             # something other than RL is using this simulation
             if self.autoplay() and not done:
                 state, reward, done = self.__skip_fixed_decisions(done)
-            return state, None, done, {}
+            return state, None, done, False, {}
         legal_actions = self.get_legal_actions()
         state_repr = self.__output_converter.modify_state(self.__core.state)
         reward = self.__output_converter.calculate_reward(self.__core.state, action, legal_actions,
@@ -213,7 +213,7 @@ class SlapEnv(gym.Env):
         if self.__output_converter is not None:
             self.__output_converter.reset()
             return self.__output_converter.modify_state(
-                self.__core.state), None
+                self.__core.state), {}
         else:
             return self.__core.state
 
@@ -596,6 +596,8 @@ class SlapEnv(gym.Env):
                 print("Error in mask")
             return mask
 
+    def action_masks(self) -> List[bool]:
+        return self.valid_action_mask()
     # </editor-fold>
 
     def __deepcopy__(self, memo):

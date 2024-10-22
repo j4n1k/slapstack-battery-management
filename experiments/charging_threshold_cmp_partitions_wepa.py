@@ -132,10 +132,10 @@ def get_charging_strategies():
         # FixedChargePolicy(40),
         # FixedChargePolicy(50),
         # FixedChargePolicy(60),
-        # FixedChargePolicy(70),
+        FixedChargePolicy(70),
         # FixedChargePolicy(80),
         # FixedChargePolicy(90),
-        FixedChargePolicy(100),
+        # FixedChargePolicy(100),
         # RandomChargePolicy([40, 50, 60, 70, 80], 42)
     ]
 
@@ -187,11 +187,11 @@ if __name__ == '__main__':
     n_partitions = 20
 
     # Strategies with charging
-    for pt_idx in range(n_partitions):
+    for pt_idx in range(1):
         params = SimulationParameters(
             use_case="wepastacks_bm",
             use_case_n_partitions=n_partitions,
-            use_case_partition_to_use=pt_idx,
+            use_case_partition_to_use=0,
             n_agvs=40,
             generate_orders=False,
             verbose=False,
@@ -205,6 +205,7 @@ if __name__ == '__main__':
             pallet_shift_penalty_factor=20,  # in seconds
             compute_feature_trackers=True,
             charging_thresholds=[40, 50, 60, 70, 80],
+            charge_during_breaks=False
         )
         all_combinations = [
             (params, charging_strategies[j], storage_policies[i], 100, 120, './result_data_charging_pt_wepa')

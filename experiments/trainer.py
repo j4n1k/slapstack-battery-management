@@ -1,6 +1,7 @@
 from os.path import sep, abspath, join
 
 import hydra
+from gymnasium.vector import AsyncVectorEnv
 from omegaconf import DictConfig, OmegaConf
 import os
 import time
@@ -9,11 +10,13 @@ from typing import Dict
 import pandas as pd
 import numpy as np
 from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
+from sb3_contrib.common.maskable.utils import get_action_masks
 
 from sb3_contrib.common.wrappers import ActionMasker
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
 from stable_baselines3 import DQN, SAC
 from sb3_contrib import MaskablePPO
+from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
 from torch.utils.tensorboard import SummaryWriter
 import wandb
 # from wandb.integration.sb3 import WandbCallback
@@ -40,7 +43,8 @@ def get_env(sim_parameters: SimulationParameters,
         partitions = [None]
     seeds = [56513]
     if state_converter:
-        if cfg.task.task.name == "go_charging":
+        if ((cfg.task.task.name == "go_charging" or cfg.task.task.name == "combined")
+                and not cfg.model.agent.name == "Threshold"):
             action_converters = [BatchFIFO(),
                                  ClosestOpenLocation(very_greedy=False),
                                  FixedChargePolicy(100)
@@ -121,12 +125,18 @@ def run_episode(simulation_parameters: SimulationParameters,
         elif env.core_env.decision_mode == "charging_check":
             prev_event = env.core_env.previous_event
             state_repr = env.current_state_repr
-            action = model.predict(state_repr,
-                                   deterministic=True)
+            if isinstance(model, MaskablePPO):
+                action_masks = get_action_masks(env)
+                action, _states = model.predict(state_repr,
+                                                action_masks=action_masks,
+                                                deterministic=True)
+            else:
+                action = model.predict(state_repr,
+                                       deterministic=True)
             # action = action[0].item()
         else:
             raise ValueError
-        output, reward, loop_controls.done, info, _ = env.step(action[0].item())
+        output, reward, loop_controls.done, info, _ = env.step(action.item())
         if print_freq and loop_controls.n_decisions % print_freq == 0:
             ExperimentLogger.print_episode_info(
                 name, start, loop_controls.n_decisions,
@@ -139,7 +149,7 @@ def run_episode(simulation_parameters: SimulationParameters,
         s = env.core_env.state
         action_taken = pd.DataFrame(data={
             "Step": [loop_controls.n_decisions],
-            "Action": [action[0] if isinstance(model, SAC) else action],
+            "Action": [action[0] if isinstance(model, SAC) else action.item()],
             "kpi__makespan": [s.time],
             "kpi__average_service_time": [s.trackers.average_service_time],
             "avg_battery_level": [am.get_average_agv_battery()],
@@ -153,7 +163,7 @@ def run_episode(simulation_parameters: SimulationParameters,
         writer.add_scalar(f'Evaluation/{pt_idx}/N_Charging_Events', sum(len(lst) for lst in am.queued_charging_events.values()), pt_idx)
         writer.add_scalar(f'Evaluation/{pt_idx}/N_Retrieval_Orders', s.trackers.n_queued_retrieval_orders, pt_idx)
         writer.add_scalar(f'Evaluation/{pt_idx}/N_Depleted_AGV', am.get_n_depleted_agvs(), pt_idx)
-        action = action[0].item()
+        action = action.item()
         # if isinstance(model, SAC):
         #     action = action.item()
         # elif isinstance(model, DQN):
@@ -196,7 +206,8 @@ def run_evaluation_tensorboard(cfg, model, storage_strategy, state_converter=Tru
             pallet_shift_penalty_factor=cfg.sim_params.pallet_shift_penalty_factor,
             compute_feature_trackers=cfg.sim_params.compute_feature_trackers,
             n_levels=cfg.sim_params.n_levels,
-            charging_thresholds=cfg.task.task.charging_thresholds
+            charging_thresholds=list(cfg.task.task.charging_thresholds),
+            charge_during_breaks=True
         )
 
         parametrization_failure, episode_results = run_episode(
@@ -219,13 +230,30 @@ def run_evaluation_tensorboard(cfg, model, storage_strategy, state_converter=Tru
         # Log action distribution
         # action_counts = np.bincount(episode_results['Action'])
         # writer.add_histogram('Evaluation/Action_Distribution', action_counts, pt_idx)
-        reward += episode_results["kpi__average_service_time"]
+        # reward += episode_results["kpi__average_service_time"]
 
     writer.close()
     return reward / len(e_partitions)
 
+
 def mask_fn(env: SlapEnv):
     return env.valid_action_mask()
+
+
+def make_env(sim_params, log_frequency, nr_zones, logfile_name, log_dir, partitions, reward_setting, cfg):
+    def _init():
+        return get_env(
+            sim_parameters=sim_params,
+            log_frequency=log_frequency,
+            nr_zones=nr_zones,
+            log_dir=log_dir,
+            logfile_name=logfile_name,
+            partitions=partitions,
+            reward_setting=reward_setting,
+            cfg=cfg
+        )
+    return _init
+
 
 @hydra.main(config_path="config", config_name="config")
 def main(cfg: DictConfig):
@@ -298,9 +326,34 @@ def main(cfg: DictConfig):
         log_dir=cfg.experiment.log_dir,
         logfile_name=f"{cfg.model.agent.name}_{cfg.experiment.id}",
         reward_setting=cfg.task.task.reward_setting,
-        partitions=[cfg.experiment.t_pt],
+        partitions=list(cfg.experiment.t_pt),
         cfg=cfg
     )
+    # vec_env = DummyVecEnv([lambda i=i: get_env(
+    #     sim_parameters=sim_params,
+    #     log_frequency=1000,
+    #     nr_zones=3,
+    #     log_dir=cfg.experiment.log_dir,
+    #     logfile_name=f"{cfg.model.agent.name}_{cfg.experiment.id}_{i}",  # Ensure unique logfile name
+    #     reward_setting=cfg.task.task.reward_setting,
+    #     partitions=[cfg.experiment.t_pt],
+    #     cfg=cfg
+    # ) for i in range(3)])
+
+    # num_envs = 4
+    # vec_env = AsyncVectorEnv(
+    #     [make_env(sim_params, 1000, 3, cfg.experiment.log_dir, f"{cfg.model.agent.name}_{cfg.experiment.id}_{i}", [cfg.experiment.t_pt], cfg.task.task.reward_setting, cfg) for i in
+    #      range(num_envs)])
+    # vec_env = AsyncVectorEnv([lambda i=i: get_env(
+    #     sim_parameters=sim_params,
+    #     log_frequency=1000,
+    #     nr_zones=3,
+    #     log_dir=cfg.experiment.log_dir,
+    #     logfile_name=f"{cfg.model.agent.name}_{cfg.experiment.id}_{i}",  # Ensure unique logfile name
+    #     reward_setting=cfg.task.task.reward_setting,
+    #     partitions=[cfg.experiment.t_pt],
+    #     cfg=cfg
+    # ) for i in range(3)])
 
     eval_env: SlapEnv = get_env(
         sim_parameters=sim_params,
@@ -309,7 +362,7 @@ def main(cfg: DictConfig):
         log_dir=cfg.experiment.log_dir,
         logfile_name=f"{cfg.model.agent.name}_{cfg.experiment.id}",
         reward_setting=1,
-        partitions=[cfg.experiment.t_pt],
+        partitions=[cfg.experiment.e_pt],
         cfg=cfg
     )
 
@@ -385,14 +438,15 @@ def main(cfg: DictConfig):
     )
     # Train the model
     if cfg.model.agent.name != "Threshold":
-        model.learn(
-            total_timesteps=cfg.experiment.total_timesteps,
-            callback=[checkpoint_callback, wandb_callback, eval_callback],
-            progress_bar=False,
-            log_interval=1,
-            tb_log_name=f"{cfg.experiment.name}_{cfg.model.agent.name}_{cfg.experiment.id}"
-        )
-        model.save(f"{cfg.experiment.log_dir}/final_model_{cfg.model.agent.name}_{cfg.experiment.id}.zip")
+        if cfg.experiment.setting == "train":
+            model.learn(
+                total_timesteps=cfg.experiment.total_timesteps,
+                callback=[checkpoint_callback, wandb_callback, eval_callback],
+                progress_bar=False,
+                log_interval=1,
+                tb_log_name=f"{cfg.experiment.name}_{cfg.model.agent.name}_{cfg.experiment.id}"
+            )
+            model.save(f"{cfg.experiment.log_dir}/final_model_{cfg.model.agent.name}_{cfg.experiment.id}.zip")
 
         # Run evaluation episode
         best_model = model.load(os.path.join(best_model_path, "best_model"))
