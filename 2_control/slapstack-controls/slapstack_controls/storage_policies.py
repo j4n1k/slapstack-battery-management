@@ -95,42 +95,6 @@ class ConstantTimeGreedyPolicy(StoragePolicy):
             return loc
 
 
-class PureLaneStorageStrategy(StoragePolicy):
-    def __init__(self, very_greedy=False):
-        super().__init__()
-        self.very_greedy = very_greedy
-
-    def get_action(self, state):
-        pass
-
-    def _get_open_locations(self, state: State, sku_to_move=None) -> Tuple[List[int], bool]:
-        immediate_return = False
-        sku = state.current_sku if not sku_to_move else sku_to_move
-        if state.door_to_door:
-            sink_location = state.location_manager.get_direct_sink_action(sku)
-            if sink_location:
-                return [sink_location], True
-        if self.very_greedy:
-            open_locations = state.location_manager.get_open_locations()
-        else:
-            open_locations = state.location_manager.get_open_locations(sku)
-        if not open_locations:
-            print()
-        return open_locations, immediate_return
-
-    @staticmethod
-    def _get_closest(src, open_locations, state, offset=0):
-        shortest_distance = np.infty
-        closest_tgt_loc = None
-        for loc in open_locations:
-            loc_tuple = unravel(loc, state.S.shape)
-            distance = np.abs(get_distance(src, loc_tuple[:2], state) - offset)
-            if distance < shortest_distance:
-                shortest_distance = distance
-                closest_tgt_loc = loc
-        return closest_tgt_loc
-
-
 class DistanceBasedStrategy(StoragePolicy):
     def __init__(self, very_greedy=False):
         super().__init__()
@@ -165,39 +129,19 @@ class DistanceBasedStrategy(StoragePolicy):
         return closest_tgt_loc
 
 
-# class ClosestOpenLocation(DistanceBasedStrategy):
-#     def __init__(self, very_greedy=False):
-#         super().__init__(very_greedy)
-#         self.name = f'{"VeryGreedy" if very_greedy else ""} COL'
-#
-#     def get_action(self, state: State, slap_core=None) -> int:
-#         src = state.I_O_positions[state.current_source_sink]
-#         open_locations, immediate_return = super()._get_open_locations(state)
-#         if immediate_return:
-#             return open_locations[0]
-#         closest_tgt_loc = super()._get_closest(src, open_locations, state)
-#         return closest_tgt_loc
-
-class ClosestOpenLocation(PureLaneStorageStrategy):
+class ClosestOpenLocation(DistanceBasedStrategy):
     def __init__(self, very_greedy=False):
         super().__init__(very_greedy)
         self.name = f'{"VeryGreedy" if very_greedy else ""} COL'
 
-    def get_action(self, state: State, source=None, sku=None) -> int:  # alex's idea
-        src = state.I_O_positions[state.current_source_sink] if not source else source
-        open_locations, immediate_return = super()._get_open_locations(state, sku_to_move=sku)
+    def get_action(self, state: State, slap_core=None) -> int:
+        src = state.I_O_positions[state.current_source_sink]
+        open_locations, immediate_return = super()._get_open_locations(state)
         if immediate_return:
             return open_locations[0]
-        ####
-        location_max_entropy_max_skus = ClassBasedStorage.get_locations_max_entropy_max_pallets(state, open_locations)
-        if location_max_entropy_max_skus and len(location_max_entropy_max_skus) > 0:
-            open_locations = location_max_entropy_max_skus
-        #norm = np.sqrt(np.square(open_locations[0] - src[0]) + np.square(open_locations[1] - src[1]))
-        distances = []
-        ###
         closest_tgt_loc = super()._get_closest(src, open_locations, state)
-        # closest = np.argmin(np.array(distances))
         return closest_tgt_loc
+
 
 class ClosestToDestination(DistanceBasedStrategy):
     def __init__(self, very_greedy=False):
