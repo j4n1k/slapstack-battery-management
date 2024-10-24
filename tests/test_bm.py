@@ -1,0 +1,349 @@
+from unittest import TestCase
+
+from experiments.experiment_commons import run_episode
+from slapstack import SlapCore
+import random
+import numpy as np
+
+from slapstack.helpers import print_3d_np
+from slapstack.interface_input import Input
+from slapstack.interface_templates import SimulationParameters
+from slapstack_controls.charging_policies import FixedChargePolicy, LowTHChargePolicy
+from slapstack_controls.storage_policies import ConstantTimeGreedyPolicy, ClosestOpenLocation
+
+
+class TestSlapEnv(TestCase):
+    def test_env_no_battery_constraints_single_pt(self):
+        params = SimulationParameters(
+            use_case="wepastacks_bm",
+            use_case_n_partitions=20,
+            use_case_partition_to_use=0,
+            n_agvs=40,
+            generate_orders=False,
+            verbose=False,
+            resetting=False,
+            initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+            pure_lanes=True,
+            n_levels=3,
+            # https://logisticsinside.eu/speed-of-warehouse-trucks/
+            agv_speed=2,
+            unit_distance=1.4,
+            pallet_shift_penalty_factor=20,  # in seconds
+            compute_feature_trackers=True,
+            charging_thresholds=[40, 50, 60, 70, 80],
+            battery_capacity=80*1000
+        )
+
+
+        run_episode(simulation_parameters=params,
+                    storage_strategy=ClosestOpenLocation(very_greedy=False),
+                    charging_strategy=FixedChargePolicy(70),
+                    print_freq=100000, warm_start=True,
+                    log_dir='./result_data_wepa/',
+                    charging_check_strategy=LowTHChargePolicy(20))
+
+    def test_env_battery_constraints_single_pt(self):
+        params = SimulationParameters(
+            use_case="wepastacks_bm",
+            use_case_n_partitions=20,
+            use_case_partition_to_use=0,
+            n_agvs=40,
+            generate_orders=False,
+            verbose=False,
+            resetting=False,
+            initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+            pure_lanes=True,
+            n_levels=3,
+            # https://logisticsinside.eu/speed-of-warehouse-trucks/
+            agv_speed=2,
+            unit_distance=1.4,
+            pallet_shift_penalty_factor=20,  # in seconds
+            compute_feature_trackers=True,
+            charging_thresholds=[40, 50, 60, 70, 80],
+            battery_capacity=80*1000
+        )
+
+
+        run_episode(simulation_parameters=params,
+                    storage_strategy=ClosestOpenLocation(very_greedy=False),
+                    charging_strategy=FixedChargePolicy(70),
+                    print_freq=100000, warm_start=True,
+                    log_dir='./result_data_wepa/',
+                    charging_check_strategy=LowTHChargePolicy(20))
+    # def test_env_multi_sources_sinks(self):
+    #     """tests slap env with 3 sources, 3 sinks, and a small order list"""
+    #     environment_parameters,seeds, log_path = get_use_case_parameters()
+    #     environment_parameters['verbose'] = False
+    #     environment_parameters['order_list'] = [("retrieval", 1, 0, 0),
+    #                                             ("delivery", 2, 100, 1),
+    #                                             ("delivery", 1, 300, 2),
+    #                                             ("retrieval", 2, 400, 1),
+    #                                             ("retrieval", 1, 500, 2),
+    #                                             ("delivery", 1, 600, 0)]
+    #     environment_parameters['n_levels'] = 2
+    #     environment_parameters['n_sources'] = 4
+    #     environment_parameters['n_sinks'] = 3
+    #     log_path = ''
+    #     parameters = Input(environment_parameters, log_path, seeds)
+    #     env = SlapCore(parameters)
+    #     env.reset()
+    #     state = env.get_state()
+    #     done = False
+    #     while not done:
+    #         legal_actions = env.get_legal_actions()
+    #         state, done = env.step(random.choice(legal_actions))
+    #     if env.verbose:
+    #         print(env.state)
+    #         print(env.state.trackers)
+    #         print("finished all orders")
+    #     self.assertTrue(done)
+    #
+    #
+    # def test_env_short_no_overlaps(self):
+    #     """tests slap env with small order list and no overlaps"""
+    #     environment_parameters, seeds, log_path = get_use_case_parameters()
+    #     environment_parameters['verbose'] = False
+    #     log_path = ''
+    #     environment_parameters['order_list'] = [("retrieval", 1, 0, 0, 1),
+    #                                             ("delivery", 2, 100, 0, 1),
+    #                                             ("delivery", 1, 300, 0, 1),
+    #                                             ("retrieval", 2, 400, 0, 1),
+    #                                             ("retrieval", 1, 500, 0, 1),
+    #                                             ("delivery", 1, 600, 0, 1)]
+    #     parameters = Input(environment_parameters, log_path, seeds)
+    #     env = SlapCore(parameters)
+    #     env.reset()
+    #     state = env.get_state()
+    #     done = False
+    #     while not done:
+    #         legal_actions = env.get_legal_actions()
+    #         state, done = env.step(random.choice(legal_actions))
+    #     if env.verbose:
+    #         print(env.state)
+    #         print(env.state.trackers)
+    #         print("finished all orders")
+    #     self.assertTrue(done)
+    #
+    # def test_env_short_with_overlaps(self):
+    #     """tests slap env with small order list and with overlaps"""
+    #     environment_parameters, seeds, log_path = get_use_case_parameters()
+    #     log_path = ''
+    #
+    #     environment_parameters['order_list'] = [("retrieval", 1, 0, 0),
+    #                                             ("delivery", 2, 10, 0),
+    #                                             ("delivery", 1, 15, 0),
+    #                                             ("retrieval", 2, 20, 0),
+    #                                             ("retrieval", 1, 25, 0),
+    #                                             ("delivery", 1, 30, 0)]
+    #     parameters = Input(environment_parameters, log_path, seeds)
+    #     env = SlapCore(parameters)
+    #     env.reset()
+    #     state = env.get_state()
+    #     done = False
+    #     while not done:
+    #         legal_actions = env.get_legal_actions()
+    #         state, done = env.step(random.choice(legal_actions))
+    #     if env.verbose:
+    #         print(env.state)
+    #         print("finished all orders")
+    #     self.assertTrue(done)
+    #
+    # def test_env_long(self):
+    #     environment_parameters, seeds, log_path = get_use_case_parameters()
+    #     environment_parameters['verbose'] = False
+    #     log_path=''
+    #     environment_parameters['generate_orders'] = True
+    #     environment_parameters['order_list'] = None
+    #     environment_parameters['n_levels'] = 2
+    #     environment_parameters['n_rows'] = 12
+    #     environment_parameters['n_columns'] = 12
+    #     environment_parameters['n_orders'] = 100
+    #     parameters = Input(environment_parameters, log_path, seeds)
+    #     env = SlapCore(parameters)
+    #     env.reset()
+    #     state = env.get_state()
+    #     done = False
+    #     while not done:
+    #         legal_actions = env.get_legal_actions()
+    #         state, done = env.step(random.choice(legal_actions))
+    #     if environment_parameters['verbose']:
+    #         print(env.state)
+    #         print("finished successfully")
+    #     self.assertTrue(done)
+    #
+    # def test_many_agvs(self):
+    #     environment_parameters, seeds, log_path = get_use_case_parameters()
+    #     log_path = ''
+    #
+    #     environment_parameters['verbose'] = True
+    #     environment_parameters['generate_orders'] = True
+    #     environment_parameters['desired_fill_level']= 0.4
+    #     environment_parameters['order_list'] = None
+    #     environment_parameters['n_levels'] = 2
+    #     environment_parameters['n_rows'] = 10
+    #     environment_parameters['n_agvs'] = 1
+    #     environment_parameters['n_columns'] = 15
+    #     environment_parameters['n_orders'] = 50
+    #     parameters = Input(environment_parameters, log_path, seeds)
+    #     env = SlapCore(parameters)
+    #     env.reset()
+    #     state = env.get_state()
+    #     done = False
+    #     while not done:
+    #         legal_actions = env.get_legal_actions()
+    #         state, done = env.step(random.choice(legal_actions))
+    #         print_3d_np(env.state.S)
+    #     if environment_parameters['verbose']:
+    #         print(env.state)
+    #         print("finished successfully")
+    #     self.assertTrue(done)
+    #
+    # def test_env_initial_random_pallets_no_storage_strategy(self):
+    #     dictionary = {1: 4, 2: 6, 3: 5}
+    #
+    #     environment_parameters, seeds, log_path = get_use_case_parameters()
+    #     log_path = ''
+    #
+    #     environment_parameters['verbose'] = False
+    #     environment_parameters['generate_orders'] = True
+    #     environment_parameters['order_list'] = None
+    #     environment_parameters['n_levels'] = 1
+    #     environment_parameters['n_rows'] = 12
+    #     environment_parameters['n_columns'] = 12
+    #     environment_parameters['n_orders'] = 10
+    #     environment_parameters['initial_pallets_sku_counts'] = dictionary.copy()
+    #     environment_parameters['n_skus'] = 3
+    #
+    #     parameters = Input(environment_parameters, log_path, seeds)
+    #     env = SlapCore(parameters)
+    #     env.reset()
+    #     assertion_dictionary = dictionary.copy()
+    #     for sku in assertion_dictionary:
+    #         sku_count = len(np.argwhere(env.storage_matrix_history[1] == sku))
+    #         assertion_dictionary[sku] = sku_count
+    #     # if environment_parameters['verbose'] is True:
+    #     # print_3d_np(env.storage_matrix_history[1])
+    #     # print(assertion_dictionary)
+    #     self.assertDictEqual(dictionary, assertion_dictionary)
+    #
+    # def test_env_initial_random_pallets_with_dict_and_storage_strategy(self):
+    #     dictionary = {1: 4, 2: 6, 3: 5}
+    #     environment_parameters, seeds, log_path = get_use_case_parameters()
+    #     log_path = ''
+    #
+    #     environment_parameters['verbose'] = False
+    #     environment_parameters['generate_orders'] = True
+    #     environment_parameters['order_list'] = None
+    #     environment_parameters['n_levels'] = 4
+    #     environment_parameters['n_rows'] = 12
+    #     environment_parameters['n_columns'] = 12
+    #     environment_parameters['n_orders'] = 10
+    #     environment_parameters['initial_pallets_sku_counts'] = dictionary.copy()
+    #     environment_parameters['n_skus'] = 3
+    #     environment_parameters['initial_pallets_storage_strategy'] = FurthestOpenLocation()
+    #
+    #     parameters = Input(environment_parameters, log_path, seeds)
+    #     env = SlapCore(parameters)
+    #     env.reset()
+    #     assertion_dictionary = dictionary.copy()
+    #     for sku in assertion_dictionary:
+    #         sku_count = len(np.argwhere(env.storage_matrix_history[1] == sku))
+    #         assertion_dictionary[sku] = sku_count
+    #     # if environment_parameters['verbose'] is True:
+    #     # print_3d_np(env.storage_matrix_history[1])
+    #     # print(assertion_dictionary)
+    #     self.assertDictEqual(dictionary, assertion_dictionary)
+    #
+    # def test_one_delivery_order(self):
+    #     """tests slap env with only one delivery order"""
+    #     environment_parameters, seeds, log_path = get_use_case_parameters()
+    #     log_path = ''
+    #
+    #     environment_parameters['verbose'] = False
+    #     environment_parameters['order_list'] = [("delivery", 1, 0, 0)]
+    #     environment_parameters['n_agvs'] = 1
+    #     environment_parameters['n_skus'] = 1
+    #     environment_parameters['n_levels'] = 1
+    #     environment_parameters['initial_pallets_sku_counts'] = {1: 0}
+    #     parameters = Input(environment_parameters, log_path, seeds)
+    #     env = SlapCore(parameters)
+    #     env.reset()
+    #     state = env.get_state()
+    #     done = False
+    #     while not done:
+    #         legal_actions = env.get_legal_actions()
+    #         state, done = env.step(random.choice(legal_actions))
+    #     if env.verbose:
+    #         print(env.state)
+    #         print(env.state.trackers)
+    #         print("finished all orders")
+    #
+    #     with self.subTest():
+    #         self.assertTrue(done)
+    #     with self.subTest():
+    #         self.assertEqual("delivery", env.decision_mode)
+    #     with self.subTest():
+    #         self.assertEqual("delivery", env.state.current_order)
+    #     with self.subTest():
+    #         self.assertEqual(1, env.previous_event.SKU)
+    #     with self.subTest():
+    #         self.assertEqual(1, env.state.current_sku)
+    #
+    # def test_one_retrieval_order(self):
+    #     """tests slap env with only one retrieval order"""
+    #     environment_parameters, seeds, log_path = get_use_case_parameters()
+    #     log_path = ''
+    #
+    #     environment_parameters['verbose'] = False
+    #     environment_parameters['order_list'] = [("retrieval", 1, 0, 0)]
+    #     environment_parameters['n_agvs'] = 1
+    #     environment_parameters['n_skus'] = 1
+    #     environment_parameters['n_levels'] = 1
+    #     environment_parameters['initial_pallets_sku_counts'] = {1: 1}
+    #     parameters = Input(environment_parameters, log_path, seeds)
+    #     env = SlapCore(parameters)
+    #     env.reset()
+    #     state = env.get_state()
+    #     done = False
+    #     while not done:
+    #         legal_actions = env.get_legal_actions()
+    #         state, done = env.step(random.choice(legal_actions))
+    #     if env.verbose:
+    #         print(env.state)
+    #         print(env.state.trackers)
+    #         print("finished all orders")
+    #     with self.subTest():
+    #         self.assertTrue(done)
+    #     with self.subTest():
+    #         self.assertEqual("retrieval", env.decision_mode)
+    #     with self.subTest():
+    #         self.assertEqual("retrieval", env.state.current_order)
+    #     with self.subTest():
+    #         self.assertEqual(1, env.previous_event.SKU)
+    #     with self.subTest():
+    #         self.assertEqual(1, env.state.current_sku)
+    #
+    # def test_not_refilling_warehouse(self):
+    #     """tests slap env with small order list and no overlaps"""
+    #     environment_parameters, seeds, log_path = get_use_case_parameters()
+    #     environment_parameters['verbose'] = False
+    #     log_path = ''
+    #     environment_parameters['n_levels'] = 1
+    #     environment_parameters['order_list'] = [("delivery", 2, 100, 0, 1),
+    #                                             ("delivery", 1, 300, 0, 1),
+    #                                             ("delivery", 1, 600, 0, 1)]
+    #     parameters = Input(environment_parameters, log_path, seeds)
+    #     env = SlapCore(parameters)
+    #     env.reset()
+    #     state = env.get_state()
+    #     done = False
+    #     while not done:
+    #         legal_actions = env.get_legal_actions()
+    #         state, done = env.step(random.choice(legal_actions))
+    #     storage_matrix = np.copy(env.state.S)
+    #     # print_3d_np(storage_matrix)
+    #     env.reset(False)
+    #     new_storage_matrix = np.copy(env.state.S)
+    #     # test=env.state_stack
+    #     # print_3d_np(new_storage_matrix)
+    #     self.assertEqual(storage_matrix.tolist(), new_storage_matrix.tolist())

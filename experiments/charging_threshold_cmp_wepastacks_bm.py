@@ -174,7 +174,7 @@ charging_strategies = get_charging_strategies()
 
 params = SimulationParameters(
                 use_case="wepastacks_bm",
-                use_case_n_partitions=20,
+                use_case_n_partitions=1,
                 use_case_partition_to_use=0,
                 n_agvs=40,
                 generate_orders=False,
