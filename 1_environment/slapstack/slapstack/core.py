@@ -584,15 +584,18 @@ class SlapCore(gym.Env):
         prev_e = self.previous_event
         travel_event = None
         if action != 0:
+            # When combined action space -> charging duration gets calculated and passed as action
             #agv: AGV = self.state.agv_manager.agv_index[prev_e.agv_id]
             agv = prev_e.agv
             agvm = self.state.agv_manager
             # agv.scheduled_charging = False
             cs = self.state.agv_manager.get_charging_station(agv.position, None)
-            left_to_full = 70 - agv.battery
+
             # charging_duration = None
             if 0 < action <= 1:
-                action = left_to_full / agvm.charging_rate
+                # left_to_full = 70 - agv.battery
+                # action = left_to_full / agvm.charging_rate
+                action = None
             #     charging_duration = charging_duration * action
             ChargingFirstLeg.charging_nr += 1
             dummy_charging_order = Order(
@@ -973,7 +976,7 @@ class SlapCore(gym.Env):
                     lowest_battery = agvm.agv_index[agv].battery
             agv = agvm.agv_index[idx]
             agv.scheduled_charging = True
-            threshold = 100
+            threshold = 80
             agv_id = agv.id
             agvm = self.state.agv_manager
             agv = self.state.agv_manager.agv_index[agv_id]

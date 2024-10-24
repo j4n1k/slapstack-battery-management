@@ -101,7 +101,7 @@ def run_episode(simulation_parameters: SimulationParameters,
             if env.done_during_init:
                 raise ValueError("Sim ended during init")
             raise ValueError
-        output, reward, loop_controls.done, info = env.step(action)
+        output, reward, loop_controls.done, info, _ = env.step(action)
         if print_freq and loop_controls.n_decisions % print_freq == 0:
             ExperimentLogger.print_episode_info(
                 charging_strategy.name, start, loop_controls.n_decisions,
@@ -128,12 +128,12 @@ def get_charging_strategies():
     charging_strategies = []
 
     charging_strategies += [
-        # FixedChargePolicy(30),
-        # FixedChargePolicy(40),
-        # FixedChargePolicy(50),
-        # FixedChargePolicy(60),
+        FixedChargePolicy(30),
+        FixedChargePolicy(40),
+        FixedChargePolicy(50),
+        FixedChargePolicy(60),
         FixedChargePolicy(70),
-        # FixedChargePolicy(80),
+        FixedChargePolicy(80),
         # FixedChargePolicy(90),
         # FixedChargePolicy(100),
         # RandomChargePolicy([40, 50, 60, 70, 80], 42)
@@ -208,7 +208,7 @@ if __name__ == '__main__':
             charge_during_breaks=False
         )
         all_combinations = [
-            (params, charging_strategies[j], storage_policies[i], 100, 120, './result_data_charging_pt_wepa')
+            (params, charging_strategies[j], storage_policies[i], 100, 120, './result_data_charging_pt_wepa/new_charge_in_break')
             for i in range(n_storage_strategies)
             for j in range(n_charging_strategies)
         ]

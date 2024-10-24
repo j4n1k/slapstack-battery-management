@@ -101,7 +101,7 @@ class SimulationParameters:
                  battery_consumption_loaded_h: float = 20,  # 15
                  battery_charging_h: float = 80,  # 80
                  charging_thresholds: Union[list[int], Tuple[float, float]] = None,
-                 charge_during_breaks: bool = True
+                 charge_during_breaks: bool = False
                  ):
 
         # The inpt that are not required when usecase is provided.
