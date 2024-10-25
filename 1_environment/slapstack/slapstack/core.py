@@ -93,7 +93,9 @@ class SlapCore(gym.Env):
         """
         self.inpt = usr_inpt
         self.rng = None
+        self.partition = None
         self.set_seed(usr_inpt.seed)
+        self.set_partition(usr_inpt.partition)
         self.events = EventManager()
         self.state = State(usr_inpt.params, self.events, self.rng)
         self.orders = SlapOrders(usr_inpt.params,
@@ -134,6 +136,9 @@ class SlapCore(gym.Env):
 
     def set_seed(self, seed):
         self.rng = np.random.default_rng(seed)
+
+    def set_partition(self, partition):
+        self.partition = partition
 
     def create_orders_from_distribution(self):
         """creates delivery and retrieval orders automatically based on input
@@ -249,7 +254,7 @@ class SlapCore(gym.Env):
         self.print("~" * 150 + "\n" + "reset\n" + "~" * 150)
         self.__init__(self.inpt, self.logger)
         self._assert_orders()
-        self.inpt.params.select_partition(0)
+        self.inpt.params.select_partition(self.partition)
         self.orders = SlapOrders(self.inpt.params, self.state.get_n_storage_locations())
         if not self.orders.generate_orders:
             self.create_orders_from_list()

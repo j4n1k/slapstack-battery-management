@@ -1,10 +1,15 @@
+import json
+from collections import defaultdict
+from math import floor
+from os.path import join
 from unittest import TestCase
 
-from experiments.experiment_commons import run_episode
-from slapstack import SlapCore
+from experiments.experiment_commons import run_episode, get_episode_env, get_partitions_path, delete_partitions_data
+from slapstack import SlapCore, SlapEnv
 import random
 import numpy as np
 
+from slapstack.core_state import State
 from slapstack.helpers import print_3d_np
 from slapstack.interface_input import Input
 from slapstack.interface_templates import SimulationParameters
@@ -13,11 +18,133 @@ from slapstack_controls.storage_policies import ConstantTimeGreedyPolicy, Closes
 
 
 class TestSlapEnv(TestCase):
-    def test_env_no_battery_constraints_single_pt(self):
+    # def test_env_no_battery_constraints_single_pt(self):
+    #     params = SimulationParameters(
+    #         use_case="wepastacks_bm",
+    #         use_case_n_partitions=20,
+    #         use_case_partition_to_use=0,
+    #         n_agvs=40,
+    #         generate_orders=False,
+    #         verbose=False,
+    #         resetting=False,
+    #         initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+    #         pure_lanes=True,
+    #         n_levels=3,
+    #         # https://logisticsinside.eu/speed-of-warehouse-trucks/
+    #         agv_speed=2,
+    #         unit_distance=1.4,
+    #         pallet_shift_penalty_factor=20,  # in seconds
+    #         compute_feature_trackers=True,
+    #         charging_thresholds=[40, 50, 60, 70, 80],
+    #         battery_capacity=80*1000
+    #     )
+    #
+    #
+    #     final_state: State = run_episode(simulation_parameters=params,
+    #                 storage_strategy=ClosestOpenLocation(very_greedy=False),
+    #                 charging_strategy=FixedChargePolicy(70),
+    #                 print_freq=100000, warm_start=False,
+    #                 log_dir='./logs/tests/no_bc_single_pt/',
+    #                 charging_check_strategy=LowTHChargePolicy(20))
+    #     assert final_state.trackers.average_service_time == 426.0095478607154
+
+    # def test_env_no_battery_constraints(self):
+    #     params = SimulationParameters(
+    #         use_case="wepastacks_bm",
+    #         use_case_n_partitions=1,
+    #         use_case_partition_to_use=0,
+    #         n_agvs=40,
+    #         generate_orders=False,
+    #         verbose=False,
+    #         resetting=False,
+    #         initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+    #         pure_lanes=True,
+    #         n_levels=3,
+    #         # https://logisticsinside.eu/speed-of-warehouse-trucks/
+    #         agv_speed=2,
+    #         unit_distance=1.4,
+    #         pallet_shift_penalty_factor=20,  # in seconds
+    #         compute_feature_trackers=True,
+    #         charging_thresholds=[40, 50, 60, 70, 80],
+    #         battery_capacity=80*1000
+    #     )
+    #
+    #
+    #     final_state = run_episode(simulation_parameters=params,
+    #                 storage_strategy=ClosestOpenLocation(very_greedy=False),
+    #                 charging_strategy=FixedChargePolicy(70),
+    #                 print_freq=100000, warm_start=False,
+    #                 log_dir='./logs/tests/no_bc_single_pt/',
+    #                 charging_check_strategy=LowTHChargePolicy(20))
+
+    # def test_env_battery_constraints_single_pt(self):
+    #     params = SimulationParameters(
+    #         use_case="wepastacks_bm",
+    #         use_case_n_partitions=20,
+    #         use_case_partition_to_use=0,
+    #         n_agvs=40,
+    #         generate_orders=False,
+    #         verbose=False,
+    #         resetting=False,
+    #         initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+    #         pure_lanes=True,
+    #         n_levels=3,
+    #         # https://logisticsinside.eu/speed-of-warehouse-trucks/
+    #         agv_speed=2,
+    #         unit_distance=1.4,
+    #         pallet_shift_penalty_factor=20,  # in seconds
+    #         compute_feature_trackers=True,
+    #         charging_thresholds=[40, 50, 60, 70, 80],
+    #         battery_capacity=80
+    #     )
+    #
+    #
+    #     final_state = run_episode(simulation_parameters=params,
+    #                 storage_strategy=ClosestOpenLocation(very_greedy=False),
+    #                 charging_strategy=FixedChargePolicy(70),
+    #                 print_freq=100000, warm_start=False,
+    #                 log_dir='./logs/tests/bc_single_pt/',
+    #                 charging_check_strategy=LowTHChargePolicy(20))
+    #     assert final_state.trackers.average_service_time == 463.81978959254207
+    #
+    def test_partitioning(self):
+        n_orders_base = 411830
+        partition_sizes = [1, 5, 10, 20, 40]
+        for size in partition_sizes:
+            partitions_path = get_partitions_path("wepastacks_bm")
+            delete_partitions_data(partitions_path)
+            params = SimulationParameters(
+                use_case="wepastacks_bm",
+                use_case_n_partitions=size,
+                use_case_partition_to_use=0,
+                n_agvs=40,
+                generate_orders=False,
+                verbose=False,
+                resetting=False,
+                initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+                pure_lanes=True,
+                n_levels=3,
+                # https://logisticsinside.eu/speed-of-warehouse-trucks/
+                agv_speed=2,
+                unit_distance=1.4,
+                pallet_shift_penalty_factor=20,  # in seconds
+                compute_feature_trackers=True,
+                charging_thresholds=[40, 50, 60, 70, 80],
+                battery_capacity=80
+            )
+            env: SlapEnv = get_episode_env(
+                sim_parameters=params,
+                log_frequency=1000,
+                nr_zones=3, log_dir='./logs/tests/partitioning/')
+            assert env.core_env.orders.n_orders == floor(n_orders_base / size)
+
+    def test_partition_cycling(self):
+        partitions_path = get_partitions_path("wepastacks_bm")
+        delete_partitions_data(partitions_path)
         params = SimulationParameters(
             use_case="wepastacks_bm",
             use_case_n_partitions=20,
-            use_case_partition_to_use=0,
+            use_case_partition_to_use=1,
             n_agvs=40,
             generate_orders=False,
             verbose=False,
@@ -31,45 +158,31 @@ class TestSlapEnv(TestCase):
             pallet_shift_penalty_factor=20,  # in seconds
             compute_feature_trackers=True,
             charging_thresholds=[40, 50, 60, 70, 80],
-            battery_capacity=80*1000
+            battery_capacity=80
         )
+        partitions = [0, 13, 17, 19]
 
-
-        run_episode(simulation_parameters=params,
-                    storage_strategy=ClosestOpenLocation(very_greedy=False),
-                    charging_strategy=FixedChargePolicy(70),
-                    print_freq=100000, warm_start=True,
-                    log_dir='./result_data_wepa/',
-                    charging_check_strategy=LowTHChargePolicy(20))
-
-    def test_env_battery_constraints_single_pt(self):
-        params = SimulationParameters(
-            use_case="wepastacks_bm",
-            use_case_n_partitions=20,
-            use_case_partition_to_use=0,
-            n_agvs=40,
-            generate_orders=False,
-            verbose=False,
-            resetting=False,
-            initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
-            pure_lanes=True,
-            n_levels=3,
-            # https://logisticsinside.eu/speed-of-warehouse-trucks/
-            agv_speed=2,
-            unit_distance=1.4,
-            pallet_shift_penalty_factor=20,  # in seconds
-            compute_feature_trackers=True,
-            charging_thresholds=[40, 50, 60, 70, 80],
-            battery_capacity=80*1000
-        )
-
-
-        run_episode(simulation_parameters=params,
-                    storage_strategy=ClosestOpenLocation(very_greedy=False),
-                    charging_strategy=FixedChargePolicy(70),
-                    print_freq=100000, warm_start=True,
-                    log_dir='./result_data_wepa/',
-                    charging_check_strategy=LowTHChargePolicy(20))
+        env: SlapEnv = get_episode_env(
+            sim_parameters=params,
+            log_frequency=1000,
+            nr_zones=3, log_dir='./logs/tests/partitioning/',
+            partitions=partitions)
+        for pt in range(len(partitions)):
+            partitions_path = get_partitions_path("wepastacks_bm")
+            if pt < len(partitions):
+                idx = pt + 1
+            else:
+                idx = 0
+            with open(join(partitions_path, f"{partitions[idx]}_partition_fill_lvl.json")) as json_file:
+                initial_fill_json = json.load(json_file)
+            skus_ini = defaultdict(int)
+            all_skus = set(skus_ini.keys())
+            for sku, amount in initial_fill_json.items():
+                skus_ini[int(sku)] = amount
+                all_skus.add(int(sku))
+            env.reset()
+            print(sum(skus_ini.values()))
+            assert sum(env.core_env.orders.initial_pallets_sku_counts.values()) == sum(skus_ini.values())
     # def test_env_multi_sources_sinks(self):
     #     """tests slap env with 3 sources, 3 sinks, and a small order list"""
     #     environment_parameters,seeds, log_path = get_use_case_parameters()

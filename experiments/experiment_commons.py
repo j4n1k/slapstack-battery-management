@@ -1,6 +1,8 @@
 import pickle
 import time
-from os.path import exists
+import shutil
+import os
+from os.path import exists,  abspath, sep
 
 import numpy as np
 import pandas as pd
@@ -53,6 +55,12 @@ class ExperimentLogger(SlapLogger):
                           columns=cols)
         df.to_csv(f'{self.log_dir}/{self.logfile_name}_{n_orders}.csv')
         self.log_data = []
+
+    def get_log(self):
+        cols = self.__get_header(self.slap_state)
+        df = pd.DataFrame(data=self.log_data,
+                          columns=cols)
+        return df
 
     @staticmethod
     def __get_header(state: State):
@@ -265,7 +273,8 @@ def run_episode(simulation_parameters: SimulationParameters,
                 charging_check_strategy,
                 print_freq=0,
                 warm_start=False, log_dir='./result_data/',
-                stop_condition=False, pickle_at_decisions=np.infty):
+                stop_condition=False, pickle_at_decisions=np.infty,
+                testing=False):
     pickle_path = (f'end_env_{storage_strategy.name}_'
                    f'{pickle_at_decisions}.pickle')
     env, loop_controls = _init_run_loop(
@@ -312,13 +321,19 @@ def run_episode(simulation_parameters: SimulationParameters,
     ExperimentLogger.print_episode_info(
         storage_strategy.name, start, loop_controls.n_decisions,
         loop_controls.state)
-    return parametrization_failure
+    if not testing:
+        return parametrization_failure
+    else:
+        return loop_controls.state
 
 
 def get_episode_env(sim_parameters: SimulationParameters,
                     log_frequency: int, nr_zones: int,
-                    log_dir='./result_data/'):
+                    log_dir='./result_data/',
+                    partitions=None):
     seeds = [56513]
+    if partitions is None:
+        partitions = [None]
     if isinstance(sim_parameters.initial_pallets_storage_strategy,
                   ClassBasedPopularity):
         sim_parameters.initial_pallets_storage_strategy = ClassBasedPopularity(
@@ -328,7 +343,7 @@ def get_episode_env(sim_parameters: SimulationParameters,
             n_zones=nr_zones
         )
     return SlapEnv(
-        sim_parameters, seeds,
+        sim_parameters, seeds, partitions,
         logger=ExperimentLogger(
             filepath=log_dir,
             n_steps_between_saves=log_frequency,
@@ -369,3 +384,115 @@ def create_output_str(model, net_arch):
         update = model.target_update_interval
         output_string = f"SAC_{buffer}_{batch}_{net}_{update}_{tau}"
     return output_string
+
+
+def gen_charging_stations(layout, n_cs) -> pd.DataFrame:
+    charging_locs = [len(layout.columns) * i // (n_cs + 1) for i in range(1, n_cs + 1)]
+    aisle = pd.DataFrame({i: -1 if i == 0 or i == len(layout.columns) - 1 else -6 if i in charging_locs else -2 for i in
+                          range(len(layout.columns))}, index=[1])
+    aisle1 = pd.DataFrame(
+        {i: -1 if i == 0 or i == len(layout.columns) - 1 else -5 if i in charging_locs else -2 for i in
+         range(len(layout.columns))}, index=[2])
+    line = pd.DataFrame(
+        {i: -1 if i == 0 or i == len(layout.columns) - 1 else -2 if i == 1 else -5 for i in range(len(layout.columns))},
+        index=[3])
+    aisle2 = pd.DataFrame(
+        {i: -1 if i == 0 or i == len(layout.columns) - 1 else -5 if i == 2 else -2 for i in range(len(layout.columns))},
+        index=[4])
+
+    layout_new = pd.concat([layout.iloc[:1], aisle, aisle1, line, aisle2, layout.iloc[1:]]).reset_index(drop=True)
+    return layout_new
+
+
+def gen_charging_stations_left(layout, n_cs) -> pd.DataFrame:
+    # Calculate the positions for charging stations
+    charging_locs = [len(layout.index) * i // (n_cs + 1) for i in range(1, n_cs + 1)]
+
+    # Create new columns for the charging stations and aisles
+    aisle = pd.Series({i: -1 if i == 0 or i == len(layout.index) - 1 else -6 if i in charging_locs else -2 for i in
+                       range(len(layout.index))})
+    aisle1 = pd.Series({i: -1 if i == 0 or i == len(layout.index) - 1 else -5 if i in charging_locs else -2 for i in
+                        range(len(layout.index))})
+    # line = pd.Series({i: -1 if i == 0 or i == len(layout.index)-1 else -2 if i == 1 else -5 for i in range(len(layout.index))})
+    # aisle2 = pd.Series({i: -1 if i == 0 or i == len(layout.index)-1 else -5 if i in charging_locs else -2 for i in range(len(layout.index))})
+    # aisle3 = pd.Series({i: -1 if i == 0 or i == len(layout.index)-1 else -5 if i in charging_locs else -2 for i in range(len(layout.index))})
+
+    # Concatenate the new columns with the existing layout, preserving the structure
+    layout_new = pd.concat([
+        layout.iloc[:, :1],  # First column of original layout
+        pd.DataFrame({0: aisle, 1: aisle1}),  # New columns
+        layout.iloc[:, 2:]  # Rest of the original layout
+    ], axis=1)
+
+    # Reset and rename the columns
+    layout_new.columns = range(len(layout_new.columns))
+
+    return layout_new
+
+
+def get_layout_path(use_case_base="wepastacks"):
+    # Get the directory of the current file (trainer.py)
+    current_dir = sep.join(abspath(__file__).split(sep)[:-1])
+
+    # Navigate up to the slapstack root directory
+    slapstack_dir = sep.join(current_dir.split(sep)[:-1])
+
+    # Construct the path to 1_layout.csv
+    layout_path = sep.join([
+        slapstack_dir,
+        "1_environment",
+        "slapstack",
+        "slapstack",
+        "use_cases",
+        use_case_base,
+        '1_layout.csv'
+    ])
+
+    # Verify that the file exists
+    if not os.path.isfile(layout_path):
+        raise FileNotFoundError(f"Layout file not found at {layout_path}")
+
+    return layout_path
+
+def count_charging_stations(df):
+    return (df == -6).sum().sum()
+
+def delete_prec_dima(folder_path, use_case):
+    files_to_delete = [f'predecessors_{use_case}.npy', f'distance_matrix_{use_case}.npy']
+    for filename in files_to_delete:
+        file_path = os.path.join(folder_path, filename)
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            print(f"Deleted: {file_path}")
+        else:
+            print(f"File not found: {file_path}")
+
+
+def delete_partitions_data(folder_path):
+    for filename in os.listdir(folder_path):
+        file_path = os.path.join(folder_path, filename)
+        try:
+            if os.path.isfile(file_path) or os.path.islink(file_path):
+                os.unlink(file_path)  # Remove the file or symbolic link
+            elif os.path.isdir(file_path):
+                shutil.rmtree(file_path)  # Remove the directory and its contents
+        except Exception as e:
+            print(f'Failed to delete {file_path}. Reason: {e}')
+
+def get_partitions_path(use_case):
+    # Get the directory of the current file (trainer.py)
+    current_dir = sep.join(abspath(__file__).split(sep)[:-1])
+
+    # Navigate up to the slapstack root directory
+    slapstack_dir = sep.join(current_dir.split(sep)[:-1])
+
+    partitions_path = sep.join([
+        slapstack_dir,
+        "1_environment",
+        "slapstack",
+        "slapstack",
+        "use_cases",
+        use_case,
+        'partitions'
+    ])
+    return partitions_path

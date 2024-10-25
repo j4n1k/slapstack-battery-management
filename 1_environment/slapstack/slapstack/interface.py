@@ -17,7 +17,7 @@ from slapstack.interface_templates import SimulationParameters, SlapLogger, \
 
 class SlapEnv(gym.Env):
     def __init__(self, environment_parameters: SimulationParameters, seeds='',
-                 logger: Union[SlapLogger, str, None] = None,
+                 partitions='', logger: Union[SlapLogger, str, None] = None,
                  state_converter: Union[OutputConverter, None] = None,
                  action_converters: Union[List[StorageStrategy], None] = None):
         self.last_reward = None
@@ -30,10 +30,20 @@ class SlapEnv(gym.Env):
             self.__seeds_remaining = []
             self.__seeds_used = []
             init_seed = 1
-        self.__env_input = Input(environment_parameters, init_seed)
+        if bool(partitions):
+            self.__partitions_remaining = partitions[1:]
+            self.__partitions_used = [partitions[0]]
+            init_partition = partitions[0]
+        else:
+            self.__partitions_remaining = []
+            self.__partitions_used = []
+            init_partition = None
+        self.__env_input = Input(environment_parameters, init_seed, init_partition)
         self.__core = SlapCore(deepcopy(self.__env_input), logger)
         self.__core.reset()
         self.__output_converter = state_converter
+        if state_converter:
+            self.feature_list = state_converter.feature_list
         self.__strategy_configuration = -1
         self.__storage_strategies = None
         self.__retrieval_strategies = None
@@ -177,7 +187,8 @@ class SlapEnv(gym.Env):
     def reset(self):
         # self.__core = SlapCore(self.__env_input)
         # seed cycling if seeds were passed
-        if bool(self.__seeds_remaining) or bool(self.__seeds_used):
+        if ((bool(self.__seeds_remaining) or bool(self.__seeds_used)) or
+                (bool(self.__partitions_remaining) or bool(self.__partitions_used))):
             if len(self.__seeds_remaining) > 0:
                 seed = self.__seeds_remaining.pop(0)
                 self.__seeds_used.append(seed)
@@ -185,7 +196,15 @@ class SlapEnv(gym.Env):
                 self.__seeds_remaining = self.__seeds_used[1:]
                 seed = self.__seeds_used[0]
                 self.__seeds_used = [seed]
-            self.__env_input = Input(self.__env_input.params, seed)
+            if len(self.__partitions_remaining) > 0:
+                pt = self.__partitions_remaining.pop(0)
+                # self.__partitions_remaining.append(pt)
+                self.__partitions_used.append(pt)
+            else:
+                self.__partitions_remaining = self.__partitions_used[1:]
+                pt = self.__partitions_used[0]
+                self.__partitions_used = [pt]
+            self.__env_input = Input(self.__env_input.params, seed, pt)
         else:
             self.__env_input = Input(self.__env_input.params)
         self.__core = SlapCore(self.__env_input, self.__core.logger)
@@ -195,7 +214,7 @@ class SlapEnv(gym.Env):
         if self.__output_converter is not None:
             self.__output_converter.reset()
             return self.__output_converter.modify_state(
-                self.__core.state)
+                self.__core.state), {}
         else:
             return self.__core.state
 

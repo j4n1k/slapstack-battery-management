@@ -50,6 +50,8 @@ class ChargingStrategy:
 
 
 class OutputConverter:
+    def __init__(self, feature_list=None):
+        self.feature_list = feature_list
     def modify_state(self, state: 'State') -> np.ndarray:
         pass
 
@@ -134,14 +136,18 @@ class SimulationParameters:
             if use_case_n_partitions > 1:
                 self.get_initial_partitions_data(use_case_n_partitions)
             use_case_partitions = self.partition_use_case(use_case_n_partitions)
-            use_case = use_case_partitions[self.use_case_partition_to_use]
+            use_case = use_case_partitions[0]
             self.n_rows = use_case.layout.shape[0]
             self.n_columns = use_case.layout.shape[1]
             self.n_skus = len(use_case.distinct_skus)
             self.all_skus = use_case.distinct_skus
             self.n_orders = len(use_case.order_list)
             self.order_list = use_case.order_list
-            self.initial_pallets_sku_counts = use_case.initial_skus[1]
+            # self.initial_pallets_sku_counts = use_case.initial_skus[1]
+            partition_idx = None
+            if self.use_case_n_partitions > 1:
+                partition_idx = self.use_case_partition_to_use
+            self.initial_pallets_sku_counts, _ = self.load_initial_skus(partition_idx)
             self.n_sources = len(
                 np.argwhere(use_case.layout == StorageKeys.SOURCE))
             self.n_sinks = len(np.argwhere(use_case.layout == StorageKeys.SINK))
@@ -205,15 +211,15 @@ class SimulationParameters:
         self.shift_penalty = pallet_shift_penalty_factor
         self.compute_feature_trackers = compute_feature_trackers
 
-    def partition_use_case(self, n_partitions=40):
+    def partition_use_case(self, n_partitions=40, partition_idx=None):
         """
         Splits the use case orders into n_partitions equal sections.
 
         :return: The use case partitions.
         """
-        partition_idx = None
         if self.use_case_n_partitions > 1:
-            partition_idx = self.use_case_partition_to_use
+            if not partition_idx:
+                partition_idx = self.use_case_partition_to_use
         order_data = self.load_orders(partition_idx)
         all_skus = SimulationParameters.get_unique_skus(order_data)
         # skus_ini = get_initial_skus(order_data,
@@ -222,9 +228,9 @@ class SimulationParameters:
         #                             percent_nowait=0.8)
         skus_ini, _ = self.load_initial_skus(partition_idx)
         part_size = int(len(order_data) / n_partitions)
-        week = order_data[0][-1]
+        week = order_data[0][-1] - 1
         uc = UseCasePartition(skus_ini, all_skus, self.layout_path,
-                              self.n_levels)
+                              self.n_levels, current_week=week)
         use_case_partitions = [uc]
         # for order in order_data:
         #     if uc.last_order - uc.first_order >= part_size:
@@ -356,10 +362,10 @@ class SimulationParameters:
         )
 
     def select_partition(self, partition_idx, period=1):
-        partition_idx = None
         if self.use_case_n_partitions > 1:
-            partition_idx = self.use_case_partition_to_use
-        use_case = self.partition_use_case(1)[0]
+            if not partition_idx:
+                partition_idx = self.use_case_partition_to_use
+        use_case = self.partition_use_case(partition_idx=partition_idx, n_partitions=1)[0]
         self.n_rows = use_case.layout.shape[0]
         self.n_columns = use_case.layout.shape[1]
         self.n_skus = len(use_case.distinct_skus)
