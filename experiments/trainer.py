@@ -228,8 +228,8 @@ def run_evaluation_tensorboard(cfg, model, storage_strategy, state_converter=Tru
         # writer.add_scalar('Evaluation/N_Retrieval_Orders', episode_results['n_queued_retrieval_orders'], pt_idx)
 
         # Log action distribution
-        # action_counts = np.bincount(episode_results['Action'])
-        # writer.add_histogram('Evaluation/Action_Distribution', action_counts, pt_idx)
+        action_counts = np.bincount(episode_results['Action'])
+        writer.add_histogram('Evaluation/Action_Distribution', action_counts, pt_idx)
         # reward += episode_results["kpi__average_service_time"]
 
     writer.close()
