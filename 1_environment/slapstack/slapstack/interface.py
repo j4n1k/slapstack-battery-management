@@ -17,7 +17,7 @@ from slapstack.interface_templates import SimulationParameters, SlapLogger, \
 
 class SlapEnv(gym.Env):
     def __init__(self, environment_parameters: SimulationParameters, seeds='',
-                 partitions='', logger: Union[SlapLogger, str, None] = None,
+                 partitions=[None], logger: Union[SlapLogger, str, None] = None,
                  state_converter: Union[OutputConverter, None] = None,
                  action_converters: Union[List[StorageStrategy], None] = None):
         self.last_reward = None
@@ -271,7 +271,7 @@ class SlapEnv(gym.Env):
             #     assert state_repr.shape == (900, )
         if self.__core.decision_mode == "charging" or self.__core.decision_mode == "charging_check":
             self.current_state_repr = state_repr
-            self.core_env.state.current_agv = self.core_env.previous_event.agv.id
+            # self.core_env.state.current_agv = self.core_env.previous_event.agv.id
         return state_repr, reward, done
 
     def autoplay(self):
