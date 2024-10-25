@@ -207,7 +207,7 @@ def run_evaluation_tensorboard(cfg, model, storage_strategy, state_converter=Tru
             compute_feature_trackers=cfg.sim_params.compute_feature_trackers,
             n_levels=cfg.sim_params.n_levels,
             charging_thresholds=list(cfg.task.task.charging_thresholds),
-            charge_during_breaks=True
+            # charge_during_breaks=True
         )
 
         parametrization_failure, episode_results = run_episode(

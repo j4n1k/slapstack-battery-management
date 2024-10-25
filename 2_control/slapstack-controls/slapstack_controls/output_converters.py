@@ -1,4 +1,4 @@
-from math import sqrt
+from math import sqrt, inf
 
 import numpy as np
 

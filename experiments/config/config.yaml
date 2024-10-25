@@ -1,0 +1,20 @@
+defaults:
+  - model: ppo
+  - task: combined
+  - sim_params: 4cs-40agv-20pt-wepa
+  - _self_
+
+experiment:
+  name: "agv_charging_rl"
+  setting: "eval"
+  log_dir: "./logs"
+  total_timesteps: 2000000
+  eval_freq: 60000
+  n_eval_episodes: 1
+  t_pt: [0]
+  e_pt: 0
+  n_cs: 4
+  id: 4cs-40agv-20pt-wepa-combined
+
+evaluation:
+  eval_partitions: [0, 1, 2, 3, 4]

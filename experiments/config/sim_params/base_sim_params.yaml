@@ -1,0 +1,15 @@
+sim_params:
+  use_case: ???
+  use_case_n_partitions: ???
+  use_case_partition_to_use: 0
+  n_agvs: ???
+  generate_orders: false
+  verbose: false
+  resetting: false
+  initial_pallets_storage_strategy: ???
+  pure_lanes: true
+  n_levels: ???
+  agv_speed: ???
+  unit_distance: ???
+  pallet_shift_penalty_factor: ???
+  compute_feature_trackers: true
