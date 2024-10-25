@@ -270,11 +270,12 @@ def _init_run_loop(simulation_parameters, storage_strategy, log_dir):
 def run_episode(simulation_parameters: SimulationParameters,
                 storage_strategy: StoragePolicy,
                 charging_strategy: ChargingPolicy,
-                charging_check_strategy,
+                charging_check_strategy: ChargingPolicy,
                 print_freq=0,
                 warm_start=False, log_dir='./result_data/',
                 stop_condition=False, pickle_at_decisions=np.infty,
-                testing=False):
+                testing=False,
+                ):
     pickle_path = (f'end_env_{storage_strategy.name}_'
                    f'{pickle_at_decisions}.pickle')
     env, loop_controls = _init_run_loop(
