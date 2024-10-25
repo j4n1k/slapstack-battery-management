@@ -20,36 +20,36 @@ from slapstack_controls.storage_policies import ConstantTimeGreedyPolicy, Closes
 
 
 class TestSlapEnv(TestCase):
-    # def test_env_no_battery_constraints_single_pt(self):
-    #     params = SimulationParameters(
-    #         use_case="wepastacks_bm",
-    #         use_case_n_partitions=20,
-    #         use_case_partition_to_use=0,
-    #         n_agvs=40,
-    #         generate_orders=False,
-    #         verbose=False,
-    #         resetting=False,
-    #         initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
-    #         pure_lanes=True,
-    #         n_levels=3,
-    #         # https://logisticsinside.eu/speed-of-warehouse-trucks/
-    #         agv_speed=2,
-    #         unit_distance=1.4,
-    #         pallet_shift_penalty_factor=20,  # in seconds
-    #         compute_feature_trackers=True,
-    #         charging_thresholds=[40, 50, 60, 70, 80],
-    #         battery_capacity=80*1000
-    #     )
-    #
-    #
-    #     final_state: State = run_episode(simulation_parameters=params,
-    #                 storage_strategy=ClosestOpenLocation(very_greedy=False),
-    #                 charging_strategy=FixedChargePolicy(70),
-    #                 print_freq=100000, warm_start=False,
-    #                 log_dir='./logs/tests/no_bc_single_pt/',
-    #                 charging_check_strategy=LowTHChargePolicy(20),
-    #                 testing=True)
-    #     assert final_state.trackers.average_service_time == 426.0095478607154
+    def test_env_no_battery_constraints_single_pt(self):
+        params = SimulationParameters(
+            use_case="wepastacks_bm",
+            use_case_n_partitions=20,
+            use_case_partition_to_use=0,
+            n_agvs=40,
+            generate_orders=False,
+            verbose=False,
+            resetting=False,
+            initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+            pure_lanes=True,
+            n_levels=3,
+            # https://logisticsinside.eu/speed-of-warehouse-trucks/
+            agv_speed=2,
+            unit_distance=1.4,
+            pallet_shift_penalty_factor=20,  # in seconds
+            compute_feature_trackers=True,
+            charging_thresholds=[40, 50, 60, 70, 80],
+            battery_capacity=80*1000
+        )
+
+
+        final_state: State = run_episode(simulation_parameters=params,
+                    storage_strategy=ClosestOpenLocation(very_greedy=False),
+                    charging_strategy=FixedChargePolicy(70),
+                    print_freq=100000, warm_start=False,
+                    log_dir='./logs/tests/no_bc_single_pt/',
+                    charging_check_strategy=LowTHChargePolicy(20),
+                    testing=True)
+        assert final_state.trackers.average_service_time == 426.0095478607154
 
     # def test_env_no_battery_constraints(self):
     #     params = SimulationParameters(
@@ -141,7 +141,8 @@ class TestSlapEnv(TestCase):
     #             nr_zones=3, log_dir='./logs/tests/partitioning/')
     #         assert env.core_env.orders.n_orders == floor(n_orders_base / size)
 
-    def test_go_charging(self):
+    def test_go_charging_combined(self):
+        # Charging Action from ChargingPolicy gets overwritten by CombinedChargingPolicy
         def get_episode_env(sim_parameters: SimulationParameters,
                             log_frequency: int, nr_zones: int,
                             logfile_name: str,
@@ -186,7 +187,7 @@ class TestSlapEnv(TestCase):
                     if env.done_during_init:
                         raise ValueError("Sim ended during init")
                     raise ValueError
-                output, reward, loop_controls.done, info = env.step(action)
+                output, reward, loop_controls.done, info, _ = env.step(action)
                 if print_freq and loop_controls.n_decisions % print_freq == 0:
                     ExperimentLogger.print_episode_info(
                         charging_check_strategy.name, start, loop_controls.n_decisions,
@@ -237,200 +238,203 @@ class TestSlapEnv(TestCase):
                                          charging_check_strategy=CombinedChargingPolicy(20, 70),
                                          testing=True)
         assert final_state.trackers.average_service_time == 463.81978959254207
+    #
+    def test_go_charging(self):
+        # Step handles the charge or not charge decision (binary). Charging duration is fixed to upper th
+        def get_episode_env(sim_parameters: SimulationParameters,
+                            log_frequency: int, nr_zones: int,
+                            logfile_name: str,
+                            log_dir: str):
+            seeds = [56513]
+            return SlapEnv(
+                sim_parameters, seeds,
+                logger=ExperimentLogger(
+                    filepath=log_dir,
+                    n_steps_between_saves=log_frequency,
+                    nr_zones=nr_zones,
+                    logfile_name=logfile_name),
+                action_converters=[BatchFIFO(),
+                                   ClosestOpenLocation(very_greedy=False),
+                                   FixedChargePolicy(70)])
 
-    # def test_go_charging(self):
-    #     def get_episode_env(sim_parameters: SimulationParameters,
-    #                         log_frequency: int, nr_zones: int,
-    #                         logfile_name: str,
-    #                         log_dir: str):
-    #         seeds = [56513]
-    #         return SlapEnv(
-    #             sim_parameters, seeds,
-    #             logger=ExperimentLogger(
-    #                 filepath=log_dir,
-    #                 n_steps_between_saves=log_frequency,
-    #                 nr_zones=nr_zones,
-    #                 logfile_name=logfile_name),
-    #             action_converters=[BatchFIFO(),
-    #                                ClosestOpenLocation(very_greedy=False),
-    #                                FixedChargePolicy(70)])
-    #
-    #     def _init_run_loop(simulation_parameters,
-    #                        log_dir):
-    #         environment: SlapEnv = get_episode_env(
-    #             sim_parameters=simulation_parameters,
-    #             log_frequency=1000, nr_zones=3, log_dir=log_dir,
-    #             logfile_name="go_charging_test")
-    #         loop_controls = LoopControl(environment, steps_per_episode=120)
-    #         # state.state_cache.perform_sanity_check()
-    #         return environment, loop_controls
-    #
-    #     def run_episode(simulation_parameters: SimulationParameters,
-    #                     charging_check_strategy,
-    #                     print_freq=0, stop_condition=False,
-    #                     log_dir='', steps_per_episode=None,
-    #                     testing=True):
-    #         env, loop_controls = _init_run_loop(
-    #             simulation_parameters, log_dir)
-    #         parametrization_failure = False
-    #         start = time.time()
-    #         while not loop_controls.done:
-    #             if env.core_env.decision_mode == "charging_check":
-    #                 prev_event = env.core_env.previous_event
-    #                 action = charging_check_strategy.get_action(loop_controls.state,
-    #                                                             agv_id=prev_event.agv.id)
-    #             else:
-    #                 if env.done_during_init:
-    #                     raise ValueError("Sim ended during init")
-    #                 raise ValueError
-    #             output, reward, loop_controls.done, info = env.step(action)
-    #             if print_freq and loop_controls.n_decisions % print_freq == 0:
-    #                 ExperimentLogger.print_episode_info(
-    #                     charging_check_strategy.name, start, loop_controls.n_decisions,
-    #                     loop_controls.state)
-    #                 # state.state_cache.perform_sanity_check()
-    #             loop_controls.n_decisions += 1
-    #             if loop_controls.pbar is not None:
-    #                 loop_controls.pbar.update(1)
-    #             if loop_controls.done:
-    #                 parametrization_failure = True
-    #                 env.core_env.logger.write_logs()
-    #             # if not loop_controls.done and stop_condition:
-    #             #     loop_controls.done = loop_controls.stop_prematurely()
-    #             #     if loop_controls.done:
-    #             #         parametrization_failure = True
-    #             #         env.core_env.logger.write_logs()
-    #         ExperimentLogger.print_episode_info(
-    #             charging_check_strategy.name, start, loop_controls.n_decisions,
-    #             loop_controls.state)
-    #         if not testing:
-    #             return parametrization_failure
-    #         else:
-    #             return loop_controls.state
-    #
-    #     params = SimulationParameters(
-    #         use_case="wepastacks_bm",
-    #         use_case_n_partitions=20,
-    #         use_case_partition_to_use=0,
-    #         n_agvs=40,
-    #         generate_orders=False,
-    #         verbose=False,
-    #         resetting=False,
-    #         initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
-    #         pure_lanes=True,
-    #         n_levels=3,
-    #         # https://logisticsinside.eu/speed-of-warehouse-trucks/
-    #         agv_speed=2,
-    #         unit_distance=1.4,
-    #         pallet_shift_penalty_factor=20,  # in seconds
-    #         compute_feature_trackers=True,
-    #         charging_thresholds=[40, 50, 60, 70, 80],
-    #         battery_capacity=80
-    #     )
-    #
-    #     final_state: State = run_episode(simulation_parameters=params,
-    #                                      print_freq=100000,
-    #                                      log_dir='./logs/tests/partitioning/go_charging',
-    #                                      charging_check_strategy=LowTHChargePolicy(20),
-    #                                      testing=True)
-    #     assert final_state.trackers.average_service_time == 463.81978959254207
+        def _init_run_loop(simulation_parameters,
+                           log_dir):
+            environment: SlapEnv = get_episode_env(
+                sim_parameters=simulation_parameters,
+                log_frequency=1000, nr_zones=3, log_dir=log_dir,
+                logfile_name="go_charging_test")
+            loop_controls = LoopControl(environment, steps_per_episode=120)
+            # state.state_cache.perform_sanity_check()
+            return environment, loop_controls
 
-    # def test_charging(self):
-    #     def get_episode_env(sim_parameters: SimulationParameters,
-    #                         log_frequency: int, nr_zones: int,
-    #                         logfile_name: str,
-    #                         log_dir: str):
-    #         seeds = [56513]
-    #         return SlapEnv(
-    #             sim_parameters, seeds,
-    #             logger=ExperimentLogger(
-    #                 filepath=log_dir,
-    #                 n_steps_between_saves=log_frequency,
-    #                 nr_zones=nr_zones,
-    #                 logfile_name=logfile_name),
-    #             action_converters=[BatchFIFO(),
-    #                                ClosestOpenLocation(very_greedy=False),
-    #                                ])
-    #
-    #     def _init_run_loop(simulation_parameters,
-    #                        log_dir):
-    #         environment: SlapEnv = get_episode_env(
-    #             sim_parameters=simulation_parameters,
-    #             log_frequency=1000, nr_zones=3, log_dir=log_dir,
-    #             logfile_name="go_charging_test")
-    #         loop_controls = LoopControl(environment, steps_per_episode=120)
-    #         # state.state_cache.perform_sanity_check()
-    #         return environment, loop_controls
-    #
-    #     def run_episode(simulation_parameters: SimulationParameters,
-    #                     charging_check_strategy,
-    #                     print_freq=0, stop_condition=False,
-    #                     log_dir='', steps_per_episode=None,
-    #                     testing=True):
-    #         env, loop_controls = _init_run_loop(
-    #             simulation_parameters, log_dir)
-    #         parametrization_failure = False
-    #         start = time.time()
-    #         while not loop_controls.done:
-    #             if env.core_env.decision_mode == "charging":
-    #                 prev_event = env.core_env.previous_event
-    #                 action = charging_check_strategy.get_action(loop_controls.state,
-    #                                                             agv_id=prev_event.agv.id)
-    #             else:
-    #                 if env.done_during_init:
-    #                     raise ValueError("Sim ended during init")
-    #                 raise ValueError
-    #             output, reward, loop_controls.done, info = env.step(action)
-    #             if print_freq and loop_controls.n_decisions % print_freq == 0:
-    #                 ExperimentLogger.print_episode_info(
-    #                     charging_check_strategy.name, start, loop_controls.n_decisions,
-    #                     loop_controls.state)
-    #                 # state.state_cache.perform_sanity_check()
-    #             loop_controls.n_decisions += 1
-    #             if loop_controls.pbar is not None:
-    #                 loop_controls.pbar.update(1)
-    #             if loop_controls.done:
-    #                 parametrization_failure = True
-    #                 env.core_env.logger.write_logs()
-    #             # if not loop_controls.done and stop_condition:
-    #             #     loop_controls.done = loop_controls.stop_prematurely()
-    #             #     if loop_controls.done:
-    #             #         parametrization_failure = True
-    #             #         env.core_env.logger.write_logs()
-    #         ExperimentLogger.print_episode_info(
-    #             charging_check_strategy.name, start, loop_controls.n_decisions,
-    #             loop_controls.state)
-    #         if not testing:
-    #             return parametrization_failure
-    #         else:
-    #             return loop_controls.state
-    #
-    #     params = SimulationParameters(
-    #         use_case="wepastacks_bm",
-    #         use_case_n_partitions=20,
-    #         use_case_partition_to_use=0,
-    #         n_agvs=40,
-    #         generate_orders=False,
-    #         verbose=False,
-    #         resetting=False,
-    #         initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
-    #         pure_lanes=True,
-    #         n_levels=3,
-    #         # https://logisticsinside.eu/speed-of-warehouse-trucks/
-    #         agv_speed=2,
-    #         unit_distance=1.4,
-    #         pallet_shift_penalty_factor=20,  # in seconds
-    #         compute_feature_trackers=True,
-    #         charging_thresholds=[40, 50, 60, 70, 80],
-    #         battery_capacity=80
-    #     )
-    #
-    #     final_state: State = run_episode(simulation_parameters=params,
-    #                                      print_freq=100000,
-    #                                      log_dir='./logs/tests/partitioning/go_charging',
-    #                                      charging_check_strategy=FixedChargePolicy(70),
-    #                                      testing=True)
-    #     assert final_state.trackers.average_service_time == 463.81978959254207
+        def run_episode(simulation_parameters: SimulationParameters,
+                        charging_check_strategy,
+                        print_freq=0, stop_condition=False,
+                        log_dir='', steps_per_episode=None,
+                        testing=True):
+            env, loop_controls = _init_run_loop(
+                simulation_parameters, log_dir)
+            parametrization_failure = False
+            start = time.time()
+            while not loop_controls.done:
+                if env.core_env.decision_mode == "charging_check":
+                    prev_event = env.core_env.previous_event
+                    action = charging_check_strategy.get_action(loop_controls.state,
+                                                                agv_id=prev_event.agv.id)
+                else:
+                    if env.done_during_init:
+                        raise ValueError("Sim ended during init")
+                    raise ValueError
+                output, reward, loop_controls.done, info, _ = env.step(action)
+                if print_freq and loop_controls.n_decisions % print_freq == 0:
+                    ExperimentLogger.print_episode_info(
+                        charging_check_strategy.name, start, loop_controls.n_decisions,
+                        loop_controls.state)
+                    # state.state_cache.perform_sanity_check()
+                loop_controls.n_decisions += 1
+                if loop_controls.pbar is not None:
+                    loop_controls.pbar.update(1)
+                if loop_controls.done:
+                    parametrization_failure = True
+                    env.core_env.logger.write_logs()
+                # if not loop_controls.done and stop_condition:
+                #     loop_controls.done = loop_controls.stop_prematurely()
+                #     if loop_controls.done:
+                #         parametrization_failure = True
+                #         env.core_env.logger.write_logs()
+            ExperimentLogger.print_episode_info(
+                charging_check_strategy.name, start, loop_controls.n_decisions,
+                loop_controls.state)
+            if not testing:
+                return parametrization_failure
+            else:
+                return loop_controls.state
+
+        params = SimulationParameters(
+            use_case="wepastacks_bm",
+            use_case_n_partitions=20,
+            use_case_partition_to_use=0,
+            n_agvs=40,
+            generate_orders=False,
+            verbose=False,
+            resetting=False,
+            initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+            pure_lanes=True,
+            n_levels=3,
+            # https://logisticsinside.eu/speed-of-warehouse-trucks/
+            agv_speed=2,
+            unit_distance=1.4,
+            pallet_shift_penalty_factor=20,  # in seconds
+            compute_feature_trackers=True,
+            charging_thresholds=[40, 50, 60, 70, 80],
+            battery_capacity=80
+        )
+
+        final_state: State = run_episode(simulation_parameters=params,
+                                         print_freq=100000,
+                                         log_dir='./logs/tests/partitioning/go_charging',
+                                         charging_check_strategy=LowTHChargePolicy(20),
+                                         testing=True)
+        assert final_state.trackers.average_service_time == 463.81978959254207
+
+    def test_charging(self):
+        # Step handles the charging duration. Go Charging is fixed to lower th
+        def get_episode_env(sim_parameters: SimulationParameters,
+                            log_frequency: int, nr_zones: int,
+                            logfile_name: str,
+                            log_dir: str):
+            seeds = [56513]
+            return SlapEnv(
+                sim_parameters, seeds,
+                logger=ExperimentLogger(
+                    filepath=log_dir,
+                    n_steps_between_saves=log_frequency,
+                    nr_zones=nr_zones,
+                    logfile_name=logfile_name),
+                action_converters=[BatchFIFO(),
+                                   ClosestOpenLocation(very_greedy=False),
+                                   LowTHChargePolicy(20)
+                                   ])
+
+        def _init_run_loop(simulation_parameters,
+                           log_dir):
+            environment: SlapEnv = get_episode_env(
+                sim_parameters=simulation_parameters,
+                log_frequency=1000, nr_zones=3, log_dir=log_dir,
+                logfile_name="go_charging_test")
+            loop_controls = LoopControl(environment, steps_per_episode=120)
+            # state.state_cache.perform_sanity_check()
+            return environment, loop_controls
+
+        def run_episode(simulation_parameters: SimulationParameters,
+                        charging_strategy,
+                        print_freq=0, stop_condition=False,
+                        log_dir='', steps_per_episode=None,
+                        testing=True):
+            env, loop_controls = _init_run_loop(
+                simulation_parameters, log_dir)
+            parametrization_failure = False
+            start = time.time()
+            while not loop_controls.done:
+                if env.core_env.decision_mode == "charging":
+                    prev_event = env.core_env.previous_event
+                    action = charging_strategy.get_action(loop_controls.state,
+                                                                agv_id=prev_event.agv.id)
+                else:
+                    if env.done_during_init:
+                        raise ValueError("Sim ended during init")
+                    raise ValueError
+                output, reward, loop_controls.done, info, _ = env.step(action)
+                if print_freq and loop_controls.n_decisions % print_freq == 0:
+                    ExperimentLogger.print_episode_info(
+                        charging_strategy.name, start, loop_controls.n_decisions,
+                        loop_controls.state)
+                    # state.state_cache.perform_sanity_check()
+                loop_controls.n_decisions += 1
+                if loop_controls.pbar is not None:
+                    loop_controls.pbar.update(1)
+                if loop_controls.done:
+                    parametrization_failure = True
+                    env.core_env.logger.write_logs()
+                # if not loop_controls.done and stop_condition:
+                #     loop_controls.done = loop_controls.stop_prematurely()
+                #     if loop_controls.done:
+                #         parametrization_failure = True
+                #         env.core_env.logger.write_logs()
+            ExperimentLogger.print_episode_info(
+                charging_strategy.name, start, loop_controls.n_decisions,
+                loop_controls.state)
+            if not testing:
+                return parametrization_failure
+            else:
+                return loop_controls.state
+
+        params = SimulationParameters(
+            use_case="wepastacks_bm",
+            use_case_n_partitions=20,
+            use_case_partition_to_use=0,
+            n_agvs=40,
+            generate_orders=False,
+            verbose=False,
+            resetting=False,
+            initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+            pure_lanes=True,
+            n_levels=3,
+            # https://logisticsinside.eu/speed-of-warehouse-trucks/
+            agv_speed=2,
+            unit_distance=1.4,
+            pallet_shift_penalty_factor=20,  # in seconds
+            compute_feature_trackers=True,
+            charging_thresholds=[40, 50, 60, 70, 80],
+            battery_capacity=80
+        )
+
+        final_state: State = run_episode(simulation_parameters=params,
+                                         print_freq=100000,
+                                         log_dir='./logs/tests/partitioning/go_charging',
+                                         charging_strategy=FixedChargePolicy(70),
+                                         testing=True)
+        assert final_state.trackers.average_service_time == 463.81978959254207
 
     # def test_partition_cycling(self):
     #     partitions_path = get_partitions_path("wepastacks_bm")

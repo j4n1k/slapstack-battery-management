@@ -35,6 +35,7 @@ class LowTHChargePolicy(ChargingStrategy):
         super().__init__()
         self.lower_threshold = lower_threshold
         self.name = "lowth"
+        self.type = "go_charging"
 
     def get_action(self, state: 'State', agv_id: int) -> int:
         go_charging = state.agv_manager.charge_needed(False, agv_id)
@@ -43,12 +44,14 @@ class LowTHChargePolicy(ChargingStrategy):
         else:
             return 0
 
+
 class CombinedChargingPolicy(ChargingStrategy):
     def __init__(self, lower_threshold: float, upper_threshold: float):
         super().__init__()
         self.lower_threshold = lower_threshold
         self.upper_threshold = upper_threshold
         self.name = "combined"
+        self.type = "go_charging"
 
     def get_action(self, state: 'State', agv_id: int) -> int:
         go_charging = state.agv_manager.charge_needed(False, agv_id)

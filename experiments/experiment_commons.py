@@ -301,7 +301,7 @@ def run_episode(simulation_parameters: SimulationParameters,
                 loop_controls.state, env.core_env)
         else:
             action = storage_strategy.get_action(loop_controls.state)
-        output, reward, loop_controls.done, info = env.step(action)
+        output, reward, loop_controls.done, info, _ = env.step(action)
         if print_freq and loop_controls.n_decisions % print_freq == 0:
             if loop_controls.n_decisions > pickle_at_decisions:
                 pickle.dump(env, open(pickle_path, 'wb'))

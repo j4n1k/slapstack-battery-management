@@ -1,9 +1,81 @@
+import os
+from typing import Union, Optional
+
 import numpy as np
 from stable_baselines3 import DQN, PPO, TD3, SAC
 from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
 from stable_baselines3.common.utils import obs_as_tensor
 import torch as th
+from stable_baselines3.common.vec_env import VecEnv, sync_envs_normalization
+from sb3_contrib.common.maskable.evaluation import evaluate_policy
 
+import gymnasium as gym
+
+import wandb
+
+class WandbCallback(BaseCallback):
+    def __init__(self, verbose=0, log_interval=1):
+        super().__init__(verbose)
+        self.log_interval = log_interval
+
+    def _on_step(self):
+        super()._on_step()
+        try:
+            training_env = self.model.get_env().envs[0].env.unwrapped.gym_env
+        except AttributeError:
+            training_env = self.model.get_env().envs[0].env.unwrapped
+        action = training_env.last_action_taken
+
+        log_dict = {}
+        obs = training_env.current_state_repr
+        observation = obs.reshape((-1,) + self.model.observation_space.shape)
+        observation = obs_as_tensor(observation, self.model.device)
+        feature_list = training_env.feature_list
+        log_dict.update({f"observations/{f}": observation[0][i].item() for i, f in enumerate(feature_list)})
+        # if observation[0][5].item() == 0:
+        #     print()
+        if isinstance(self.model, DQN):
+            with th.no_grad():
+                q_values = self.model.q_net(observation)
+            q_max = q_values.max().item()
+            q_values = q_values.tolist()[0]
+            for t, v in enumerate(q_values):
+                log_dict[f"train/q_value_{t}"] = v
+            log_dict["train/max_q_value"] = q_max
+
+        if isinstance(self.model, PPO) or isinstance(self.model, TD3):
+            action = self.__denormalize_action(action)
+
+        agvm = training_env.core_env.state.agv_manager
+        queue_per_station = {cs: 0 for cs in agvm.free_charging_stations}
+        for cs in agvm.booked_charging_stations.keys():
+            queue_per_station[cs] = len(agvm.booked_charging_stations[cs])
+
+        log_dict.update({
+            "train/last_charging_action": action,
+            "train/average_service_time": training_env.core_env.state.trackers.average_service_time,
+            "train/n_retrieval_orders": training_env.core_env.state.trackers.n_queued_retrieval_orders,
+            "train/n_delivery_orders": training_env.core_env.state.trackers.n_queued_delivery_orders,
+            "train/n_depleted_amr": training_env.core_env.state.agv_manager.get_n_depleted_agvs(),
+            "train/queued_charging_events": np.average(list(queue_per_station.values())),
+            "train/last_reward": training_env.last_reward,
+        })
+
+        wandb.log(log_dict, step=self.num_timesteps)
+
+        if isinstance(self.model, DQN) or isinstance(self.model, SAC):
+            if self.model.num_timesteps % self.log_interval == 0:
+                self._dump_logs_to_wandb()
+
+        return True
+
+    def _dump_logs_to_wandb(self):
+        for key, value in self.model.logger.name_to_value.items():
+            wandb.log({f"train/{key}": value}, step=self.num_timesteps)
+
+    def __denormalize_action(self, action):
+        # Implement your denormalization logic here
+        return action
 
 class TensorBoardCallback(BaseCallback):
     def __init__(self, verbose, log_interval):
@@ -62,3 +134,125 @@ class TensorBoardCallback(BaseCallback):
         c, d = target_range
         a, b = original_range
         return ((y - c) * (b - a) / (d - c)) + a
+
+
+class MaskableEvalCallback(EvalCallback):
+    """
+    Custom EvalCallback that supports action masking.
+    Inherits from the standard EvalCallback.
+    """
+    def __init__(
+        self,
+        eval_env: Union[gym.Env, VecEnv],
+        callback_on_new_best: Optional[EvalCallback] = None,
+        callback_after_eval: Optional[EvalCallback] = None,
+        n_eval_episodes: int = 5,
+        eval_freq: int = 10000,
+        log_path: Optional[str] = None,
+        best_model_save_path: Optional[str] = None,
+        deterministic: bool = True,
+        render: bool = False,
+        verbose: int = 1,
+        warn: bool = True,
+    ):
+        super().__init__(
+            eval_env,
+            callback_on_new_best=callback_on_new_best,
+            callback_after_eval=callback_after_eval,
+            n_eval_episodes=n_eval_episodes,
+            eval_freq=eval_freq,
+            log_path=log_path,
+            best_model_save_path=best_model_save_path,
+            deterministic=deterministic,
+            render=render,
+            verbose=verbose,
+            warn=warn,
+        )
+
+    def _on_step(self) -> bool:
+        continue_training = True
+
+        if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
+            # Sync training and eval env if there is VecNormalize
+            if self.model.get_vec_normalize_env() is not None:
+                try:
+                    sync_envs_normalization(self.training_env, self.eval_env)
+                except AttributeError as e:
+                    raise AssertionError(
+                        "Training and eval env are not wrapped the same way, "
+                        "see https://stable-baselines3.readthedocs.io/en/master/guide/callbacks.html#evalcallback "
+                        "and warning above."
+                    ) from e
+
+            # Reset success rate buffer
+            self._is_success_buffer = []
+
+            episode_rewards, episode_lengths = evaluate_policy(
+                self.model,
+                self.eval_env,
+                n_eval_episodes=self.n_eval_episodes,
+                render=self.render,
+                deterministic=self.deterministic,
+                return_episode_rewards=True,
+                warn=self.warn,
+                callback=self._log_success_callback,
+            )
+
+            if self.log_path is not None:
+                assert isinstance(episode_rewards, list)
+                assert isinstance(episode_lengths, list)
+                self.evaluations_timesteps.append(self.num_timesteps)
+                self.evaluations_results.append(episode_rewards)
+                self.evaluations_length.append(episode_lengths)
+
+                kwargs = {}
+                # Save success log if present
+                if len(self._is_success_buffer) > 0:
+                    self.evaluations_successes.append(self._is_success_buffer)
+                    kwargs = dict(successes=self.evaluations_successes)
+
+                np.savez(
+                    self.log_path,
+                    timesteps=self.evaluations_timesteps,
+                    results=self.evaluations_results,
+                    ep_lengths=self.evaluations_length,
+                    **kwargs,
+                )
+
+            mean_reward, std_reward = np.mean(episode_rewards), np.std(episode_rewards)
+            mean_ep_length, std_ep_length = np.mean(episode_lengths), np.std(episode_lengths)
+            self.last_mean_reward = float(mean_reward)
+
+            if self.verbose >= 1:
+                print(
+                    f"Eval num_timesteps={self.num_timesteps}, " f"episode_reward={mean_reward:.2f} +/- {std_reward:.2f}")
+                print(f"Episode length: {mean_ep_length:.2f} +/- {std_ep_length:.2f}")
+            # Add to current Logger
+            self.logger.record("eval/mean_reward", float(mean_reward))
+            self.logger.record("eval/mean_ep_length", mean_ep_length)
+
+            if len(self._is_success_buffer) > 0:
+                success_rate = np.mean(self._is_success_buffer)
+                if self.verbose >= 1:
+                    print(f"Success rate: {100 * success_rate:.2f}%")
+                self.logger.record("eval/success_rate", success_rate)
+
+            # Dump log so the evaluation results are printed with the correct timestep
+            self.logger.record("time/total_timesteps", self.num_timesteps, exclude="tensorboard")
+            self.logger.dump(self.num_timesteps)
+
+            if mean_reward > self.best_mean_reward:
+                if self.verbose >= 1:
+                    print("New best mean reward!")
+                if self.best_model_save_path is not None:
+                    self.model.save(os.path.join(self.best_model_save_path, "best_model"))
+                self.best_mean_reward = float(mean_reward)
+                # Trigger callback on new best model, if needed
+                if self.callback_on_new_best is not None:
+                    continue_training = self.callback_on_new_best.on_step()
+
+            # Trigger callback after every evaluation, if needed
+            if self.callback is not None:
+                continue_training = continue_training and self._on_event()
+
+        return continue_training

@@ -1,7 +1,7 @@
 import time
 from typing import Tuple, List, Any, Union
 
-import gym
+import gymnasium as gym
 import numpy as np
 from slapstack.core_events import (Retrieval, RetrievalFirstLeg,
                                    DeliverySecondLeg, Travel, Delivery, Event,
@@ -245,7 +245,7 @@ class SlapCore(gym.Env):
     #     """
     #     self.storage_matrix_history.append(self.state.S)
 
-    def reset(self):
+    def reset(self, seed):
         """this function should be called to initialize and/or reset the
         slap environment to its initial state. It initializes inpt,
         adds initial pallets, creates orders, logs states. Lastly, it executes
