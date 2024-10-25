@@ -8,7 +8,7 @@ from copy import deepcopy
 import pandas as pd
 import numpy as np
 
-from experiment_commons import ExperimentLogger, LoopControl
+from experiment_commons import ExperimentLogger, LoopControl, get_partitions_path, delete_partitions_data
 from slapstack import SlapEnv
 from slapstack.helpers import parallelize_heterogeneously
 from slapstack.interface_templates import SimulationParameters
@@ -130,6 +130,8 @@ if __name__ == '__main__':
     st = [ClosestOpenLocation(very_greedy=False)]
     n_charging_strategies = len(charging_strategies)
     n_storage_strategies = len(storage_policies)
+    partitions_path = get_partitions_path("wepastacks_bm")
+    delete_partitions_data(partitions_path)
     # parallel charging strat
     n_partitions = 20
     for pt in range(n_partitions):
@@ -150,6 +152,7 @@ if __name__ == '__main__':
             pallet_shift_penalty_factor=20,  # in seconds
             compute_feature_trackers=True,
             charging_thresholds=[40, 50, 60, 70, 80],
+            partition_by_week=True
         )
         parallelize_heterogeneously(
             [run_episode] * n_charging_strategies,
