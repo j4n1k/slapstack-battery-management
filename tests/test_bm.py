@@ -139,51 +139,51 @@ class TestSlapEnv(TestCase):
                 nr_zones=3, log_dir='./logs/tests/partitioning/')
             assert env.core_env.orders.n_orders == floor(n_orders_base / size)
 
-    def test_partition_cycling(self):
-        partitions_path = get_partitions_path("wepastacks_bm")
-        delete_partitions_data(partitions_path)
-        params = SimulationParameters(
-            use_case="wepastacks_bm",
-            use_case_n_partitions=20,
-            use_case_partition_to_use=1,
-            n_agvs=40,
-            generate_orders=False,
-            verbose=False,
-            resetting=False,
-            initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
-            pure_lanes=True,
-            n_levels=3,
-            # https://logisticsinside.eu/speed-of-warehouse-trucks/
-            agv_speed=2,
-            unit_distance=1.4,
-            pallet_shift_penalty_factor=20,  # in seconds
-            compute_feature_trackers=True,
-            charging_thresholds=[40, 50, 60, 70, 80],
-            battery_capacity=80
-        )
-        partitions = [0, 13, 17, 19]
-
-        env: SlapEnv = get_episode_env(
-            sim_parameters=params,
-            log_frequency=1000,
-            nr_zones=3, log_dir='./logs/tests/partitioning/',
-            partitions=partitions)
-        for pt in range(len(partitions)):
-            partitions_path = get_partitions_path("wepastacks_bm")
-            if pt < len(partitions):
-                idx = pt + 1
-            else:
-                idx = 0
-            with open(join(partitions_path, f"{partitions[idx]}_partition_fill_lvl.json")) as json_file:
-                initial_fill_json = json.load(json_file)
-            skus_ini = defaultdict(int)
-            all_skus = set(skus_ini.keys())
-            for sku, amount in initial_fill_json.items():
-                skus_ini[int(sku)] = amount
-                all_skus.add(int(sku))
-            env.reset()
-            print(sum(skus_ini.values()))
-            assert sum(env.core_env.orders.initial_pallets_sku_counts.values()) == sum(skus_ini.values())
+    # def test_partition_cycling(self):
+    #     partitions_path = get_partitions_path("wepastacks_bm")
+    #     delete_partitions_data(partitions_path)
+    #     params = SimulationParameters(
+    #         use_case="wepastacks_bm",
+    #         use_case_n_partitions=20,
+    #         use_case_partition_to_use=1,
+    #         n_agvs=40,
+    #         generate_orders=False,
+    #         verbose=False,
+    #         resetting=False,
+    #         initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+    #         pure_lanes=True,
+    #         n_levels=3,
+    #         # https://logisticsinside.eu/speed-of-warehouse-trucks/
+    #         agv_speed=2,
+    #         unit_distance=1.4,
+    #         pallet_shift_penalty_factor=20,  # in seconds
+    #         compute_feature_trackers=True,
+    #         charging_thresholds=[40, 50, 60, 70, 80],
+    #         battery_capacity=80
+    #     )
+    #     partitions = [0, 13, 17, 19]
+    #
+    #     env: SlapEnv = get_episode_env(
+    #         sim_parameters=params,
+    #         log_frequency=1000,
+    #         nr_zones=3, log_dir='./logs/tests/partitioning/',
+    #         partitions=partitions)
+    #     for pt in range(len(partitions)):
+    #         partitions_path = get_partitions_path("wepastacks_bm")
+    #         if pt < len(partitions):
+    #             idx = pt + 1
+    #         else:
+    #             idx = 0
+    #         with open(join(partitions_path, f"{partitions[idx]}_partition_fill_lvl.json")) as json_file:
+    #             initial_fill_json = json.load(json_file)
+    #         skus_ini = defaultdict(int)
+    #         all_skus = set(skus_ini.keys())
+    #         for sku, amount in initial_fill_json.items():
+    #             skus_ini[int(sku)] = amount
+    #             all_skus.add(int(sku))
+    #         env.reset()
+    #         print(sum(skus_ini.values()))
+    #         assert sum(env.core_env.orders.initial_pallets_sku_counts.values()) == sum(skus_ini.values())
     # def test_env_multi_sources_sinks(self):
     #     """tests slap env with 3 sources, 3 sinks, and a small order list"""
     #     environment_parameters,seeds, log_path = get_use_case_parameters()

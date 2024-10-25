@@ -405,6 +405,8 @@ class SlapCore(gym.Env):
             self.events.add_future_event(event)
         self.logger.log_state()
         done_prematurely = self.step_no_action()
+        if hasattr(self.previous_event, "agv_id"):
+            self.state.current_agv = self.previous_event.agv_id
         return self.__has_ended(done_prematurely)
 
     def __has_ended(self, done_prematurely: bool) -> (State, bool):
@@ -513,7 +515,9 @@ class SlapCore(gym.Env):
 
     def __create_event_on_cs_arrival(
             self, action: int):
-        prev_e = self.previous_event
+        prev_e: ChargingFirstLeg = self.previous_event
+        if prev_e.fixed_charging_duration:
+            action = prev_e.fixed_charging_duration
         # TODO Revisit EventType und Events
         # delivery_order: Union[Delivery, None] = None
         time_done = self.state.time + action

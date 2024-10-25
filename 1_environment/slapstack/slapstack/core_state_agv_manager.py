@@ -22,12 +22,14 @@ class AGV:
         :param transport_id: The unique transport id.
         :param pos: The current AGV position.
         """
+        self.util_since_last_charge = 0
         self.scheduled_charging = False
         self.id = transport_id
         self.position = pos
         self.free = True
         self.booking_time = -1
         self.utilization = 0
+        self.charging_utilization = 0
         self.forks = forks
         self.servicing_order_type = None
         self.available_forks = self.forks
@@ -35,6 +37,8 @@ class AGV:
         self.battery = 100
         self.charging_needed = False
         self.n_charging_stops = 0
+        self.orders_since_last_charge = 0
+        self.charging = False
 
     def log_booking(self, booking_time: float):
         """
@@ -58,7 +62,14 @@ class AGV:
         """
         self.position = position
         self.free = True
-        self.utilization += release_time - self.booking_time
+        if not self.charging_needed:
+            self.utilization += release_time - self.booking_time
+            self.util_since_last_charge += release_time - self.booking_time
+        else:
+            self.charging = False
+            self.n_charging_stops += 1
+            self.charging_utilization += release_time - self.booking_time
+            self.util_since_last_charge = 0
 
 
 class AgvManager:
@@ -110,6 +121,7 @@ class AgvManager:
         self.router = router
         self.n_charging_stations = len(np.argwhere(self.router.s[:, :, 0]
                                                    == StorageKeys.CHARGING_STATION))
+        self.n_charging_agvs = 0
         print(self.n_charging_stations)
         self.agv_trackers = AGVTrackers(self)
 
@@ -335,7 +347,7 @@ class AgvManager:
 
     def book_agv(self, agv_pos: Tuple[int, int], system_time: float,
                  free_agv_index: int, order_type: str,
-                 event_manager: 'EventManager'
+                 event_manager: 'EventManager', charging_booking=False
                  ):
         """
         Called whenever a fist leg transport event starts. Depending on the
@@ -363,7 +375,10 @@ class AgvManager:
             agv.servicing_order_type = order_type
         agv.available_forks -= 1
         if agv.available_forks == 0:
-            self.n_busy_agvs += 1
+            if not charging_booking:
+                self.n_busy_agvs += 1
+            else:
+                self.n_charging_agvs += 1
             self.n_free_agvs -= 1
             self.free_agv_positions[agv_pos].pop(free_agv_index)
         if not self.free_agv_positions[agv_pos]:
@@ -389,9 +404,10 @@ class AgvManager:
             #     pass
             # if (not agv.servicing_order_type == "charging_first_leg" or
             #         (self.charge_in_break_started and agv.scheduled_charging)):
-                # if not self.charge_needed(False, agv.id):
-            if (not agv.servicing_order_type == "charging_first_leg" and
-                    not agv.servicing_order_type == "charging_check"):
+            # if not self.charge_needed(False, agv.id):
+            if ((not agv.servicing_order_type == "charging_first_leg" and
+                 not agv.servicing_order_type == "charging_check") or
+                    (self.charge_in_break_started and agv.scheduled_charging)):
                 # if not self.charge_needed(False, agv.id):
                 self.booked_idle_positions.remove(agv_pos)
                 self.free_idle_positions.add(agv_pos)
@@ -464,6 +480,7 @@ class AgvManager:
         agv = self.agv_index[agv_id]
         agv.battery += charging_time * self.charging_rate
         agv.charging_needed = False
+        self.n_charging_agvs -= 1
         try:
             assert agv.battery <= 100
         except:
