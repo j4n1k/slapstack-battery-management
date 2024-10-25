@@ -43,6 +43,23 @@ class LowTHChargePolicy(ChargingStrategy):
         else:
             return 0
 
+class CombinedChargingPolicy(ChargingStrategy):
+    def __init__(self, lower_threshold: float, upper_threshold: float):
+        super().__init__()
+        self.lower_threshold = lower_threshold
+        self.upper_threshold = upper_threshold
+        self.name = "combined"
+
+    def get_action(self, state: 'State', agv_id: int) -> int:
+        go_charging = state.agv_manager.charge_needed(False, agv_id)
+        if go_charging:
+            agv: AGV = state.agv_manager.agv_index[agv_id]
+            charge_to_full = self.upper_threshold - agv.battery
+            charging_duration = charge_to_full / state.agv_manager.charging_rate
+            return charging_duration
+        else:
+            return 0
+
 
 class FixedChargePolicy(ChargingPolicy):
     def __init__(self, charging_threshold: int):

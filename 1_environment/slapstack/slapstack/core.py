@@ -536,14 +536,22 @@ class SlapCore(gym.Env):
                                          action: int):
         prev_e = self.previous_event
         travel_event = None
-        if action == 1:
+        if action != 0:
             #agv: AGV = self.state.agv_manager.agv_index[prev_e.agv_id]
             agv = prev_e.agv
             agv.scheduled_charging = False
             cs = self.state.agv_manager.get_charging_station(agv.position, None)
+            d = self.state.agv_manager.router.get_distance(agv.position, cs)
+            t = (d * self.state.agv_manager.router.unit_distance
+                             / self.state.agv_manager.router.speed)
+            depleted_unitl_cs = self.state.agv_manager.consumption_rate_unloaded * t
+            to_add = depleted_unitl_cs / self.state.agv_manager.charging_rate
             ChargingFirstLeg.charging_nr += 1
             dummy_charging_order = Order(
                 -np.infty, -999, ChargingFirstLeg.charging_nr * -1, -999, False)
+            fixed_charging_duration = None
+            if action > 1:
+                fixed_charging_duration = action + to_add
             travel_event = ChargingFirstLeg(
                 state=self.state,
                 start_point=prev_e.last_node,
@@ -554,7 +562,8 @@ class SlapCore(gym.Env):
                 orders=None,
                 order=dummy_charging_order,
                 agv_id=agv.id,
-                core=self.events)
+                core=self.events,
+                fixed_charging_duration=fixed_charging_duration)
         elif action == 0:
             agv = prev_e.agv
             self.state.agv_manager.release_agv(prev_e.last_node, self.state.time, agv.id)
