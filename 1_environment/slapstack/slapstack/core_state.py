@@ -261,6 +261,7 @@ class State:
 
         """
         # simulation inpt
+        self.next_main_event_time = 0
         self.n_initial_storage = -1
         self.params: SimulationParameters = params
         # matrices
@@ -746,6 +747,12 @@ class State:
 
     def set_current_destination(self, destination):
             self.current_destination = destination
+
+    def set_main_event_time(self, main_event):
+        if main_event.time > self.next_main_event_time:
+            self.next_main_event_time = main_event.time
+        else:
+            pass
 
     def __deepcopy__(self, memo):
         return faster_deepcopy(self, memo)

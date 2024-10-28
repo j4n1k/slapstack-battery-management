@@ -33,7 +33,7 @@ from slapstack_controls.storage_policies import ClosestOpenLocation, ConstantTim
 from slapstack_controls.charging_policies import (FixedChargePolicy,
                                                   RandomChargePolicy,
                                                   FullChargePolicy,
-                                                  ChargingPolicy)
+                                                  ChargingPolicy, LowTHChargePolicy)
 
 def get_env(sim_parameters: SimulationParameters,
             log_frequency: int,
@@ -55,7 +55,8 @@ def get_env(sim_parameters: SimulationParameters,
             decision_mode = "charging_check"
         else:
             action_converters = [BatchFIFO(),
-                                 ClosestOpenLocation(very_greedy=False)
+                                 ClosestOpenLocation(very_greedy=False),
+                                 LowTHChargePolicy(20)
                                  ]
             feature_list = ["n_depleted_agvs", "avg_battery", "utilization",
                  "queue_len_charging_station", "global_fill_level",
@@ -194,6 +195,7 @@ def run_evaluation_tensorboard(cfg, model, storage_strategy, state_converter=Tru
         params = SimulationParameters(
             use_case=cfg.sim_params.use_case,
             use_case_n_partitions=cfg.sim_params.use_case_n_partitions,
+            partition_by_week=True,
             use_case_partition_to_use=pt_idx,
             n_agvs=cfg.sim_params.n_agvs,
             generate_orders=cfg.sim_params.generate_orders,
@@ -207,7 +209,7 @@ def run_evaluation_tensorboard(cfg, model, storage_strategy, state_converter=Tru
             compute_feature_trackers=cfg.sim_params.compute_feature_trackers,
             n_levels=cfg.sim_params.n_levels,
             charging_thresholds=list(cfg.task.task.charging_thresholds),
-            # charge_during_breaks=True
+            charge_during_breaks=True
         )
 
         parametrization_failure, episode_results = run_episode(
@@ -299,6 +301,7 @@ def main(cfg: DictConfig):
     sim_params = SimulationParameters(
         use_case=cfg.sim_params.use_case,
         use_case_n_partitions=cfg.sim_params.use_case_n_partitions,
+        partition_by_week=True,
         use_case_partition_to_use=cfg.sim_params.use_case_partition_to_use,
         n_agvs=cfg.sim_params.n_agvs,
         generate_orders=cfg.sim_params.generate_orders,
@@ -311,7 +314,8 @@ def main(cfg: DictConfig):
         pallet_shift_penalty_factor=cfg.sim_params.pallet_shift_penalty_factor,
         compute_feature_trackers=cfg.sim_params.compute_feature_trackers,
         n_levels=cfg.sim_params.n_levels,
-        charging_thresholds=th
+        charging_thresholds=th,
+        charge_during_breaks=False
     )
 
     # Create environment

@@ -101,12 +101,12 @@ def get_charging_strategies():
     charging_strategies = []
 
     charging_strategies += [
-        # FixedChargePolicy(30),
-        # FixedChargePolicy(40),
-        # FixedChargePolicy(50),
-        # FixedChargePolicy(60),
+        FixedChargePolicy(30),
+        FixedChargePolicy(40),
+        FixedChargePolicy(50),
+        FixedChargePolicy(60),
         FixedChargePolicy(70),
-        # FixedChargePolicy(80),
+        FixedChargePolicy(80),
         # FixedChargePolicy(90),
         # FixedChargePolicy(100),
         # RandomChargePolicy([40, 50, 60, 70, 80], 1)
@@ -133,12 +133,13 @@ if __name__ == '__main__':
     partitions_path = get_partitions_path("wepastacks_bm")
     delete_partitions_data(partitions_path)
     # parallel charging strat
-    n_partitions = 20
+    n_partitions = 14
     for pt in range(n_partitions):
         params = SimulationParameters(
             use_case="wepastacks_bm",
             use_case_n_partitions=n_partitions,
             use_case_partition_to_use=pt,
+            partition_by_week=True,
             n_agvs=40,
             generate_orders=False,
             verbose=False,
@@ -152,7 +153,7 @@ if __name__ == '__main__':
             pallet_shift_penalty_factor=20,  # in seconds
             compute_feature_trackers=True,
             charging_thresholds=[40, 50, 60, 70, 80],
-            partition_by_week=True
+            charge_during_breaks=True
         )
         parallelize_heterogeneously(
             [run_episode] * n_charging_strategies,
@@ -161,7 +162,7 @@ if __name__ == '__main__':
                      [[None]] * n_charging_strategies,  # partitions to cycle
                      [0] * n_charging_strategies,                         # print_freq
                      [False] * n_charging_strategies,   # stop condition
-                     ['./result_data_charging_wepa'] * n_charging_strategies,
+                     ['./result_data_charging_wepa/20cs/charge_in_breaks'] * n_charging_strategies,
                      [None] * n_charging_strategies,
                      [[BatchFIFO(),
                       ClosestOpenLocation(very_greedy=False),

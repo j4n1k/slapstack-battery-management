@@ -91,6 +91,7 @@ class AgvManager:
         :param storage_matrix: The vehicle matrix from which to extract the
             initial AGV positions.
         """
+        self.n_charging_agvs = 0
         self.consumption_rate_unloaded = p.consumption_rate_unloaded
         self.consumption_rate_loaded = p.consumption_rate_loaded
         self.charging_rate = p.charging_rate
@@ -121,9 +122,13 @@ class AgvManager:
         self.router = router
         self.n_charging_stations = len(np.argwhere(self.router.s[:, :, 0]
                                                    == StorageKeys.CHARGING_STATION))
-        self.n_charging_agvs = 0
         print(self.n_charging_stations)
         self.agv_trackers = AGVTrackers(self)
+        self.max_charging_time_frame = 14400
+        self.charge_in_break_started = False
+        self.first_charge_during_break = False
+        self.full_time_delta = 0
+        self.time_of_next_main_event = 0
 
 
     @staticmethod

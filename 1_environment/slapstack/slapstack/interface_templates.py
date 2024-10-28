@@ -101,7 +101,8 @@ class SimulationParameters:
                  battery_consumption_loaded_h: float = 20,  # 15
                  battery_charging_h: float = 80,  # 80
                  charging_thresholds: Union[list[int], Tuple[float, float]] = None,
-                 partition_by_week: bool = False
+                 partition_by_week: bool = False,
+                 charge_during_breaks: bool = False
                  ):
 
         # The inpt that are not required when usecase is provided.
@@ -117,6 +118,7 @@ class SimulationParameters:
         self.charging_rate = ((self.battery_charging_h / 3600)
                               / self.battery_capacity) * 100
         self.charging_thresholds = charging_thresholds
+        self.charge_during_breaks = charge_during_breaks
         self.material_handling_time = material_handling_time
         optionals = [
             n_rows, n_columns, n_levels, n_skus, all_skus, n_orders, order_list,
