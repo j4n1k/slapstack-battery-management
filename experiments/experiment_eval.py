@@ -25,12 +25,14 @@ wandb.login(key=api_key)
 
 api = wandb.Api()
 
-# 20cs: 63kvm9u2
+# 20cs no_charge_in_breaks: 5ci1627k
 # 4cs: smng8nfs
+# 20cs charge_in_breaks (eval only): 5qdjkxob
+# 20cs charge_in_breaks (train): q7y9vy3q
 # Specify your project and run ID
 entity = "j4b"        # Your WandB username or team name
 project = "rl-battery-management" # Your WandB project name
-run_id = "5ci1627k" # "f8l4u7x4" # "waj0fjc3"         # ID of the specific run
+run_id = "q7y9vy3q" # "f8l4u7x4" # "waj0fjc3"         # ID of the specific run
 
 # Retrieve the run object
 run = api.run(f"{entity}/{project}/runs/{run_id}")
@@ -218,7 +220,7 @@ ppo_results = {i: 0 for i in range(num_partitions)}
 # Loop through each partition to retrieve and compute statistics
 for i in range(num_partitions):
     # Construct the key for the specific partition
-    key = f"Evaluation/{i}/Servicetime"
+    key = f"logs/Evaluation/{i}/Servicetime"
 
     # Retrieve history for the current partition
     history_df = run.history(keys=[key])
