@@ -91,6 +91,7 @@ class SlapCore(gym.Env):
             first value in state_stack
         logger: Logger
         """
+        self.charge_during_breaks = usr_inpt.params.charge_during_breaks
         self.inpt = usr_inpt
         self.rng = None
         self.partition = None
@@ -295,6 +296,21 @@ class SlapCore(gym.Env):
         while (not action_needed
                and (e.running or retrieval_ok or delivery_ok)):
             self.print("~" * 150 + "\n" + "step no action \n" + "~" * 150)
+            if self.charge_during_breaks:
+                charge_time_check = self.time_check_charging()
+                if charge_time_check:
+                    action_needed_last_main_event = None
+                    agvm = self.state.agv_manager
+                    if agvm.charge_in_break_started == False:
+                        # agvm.first_charge_during_break = True
+                        agvm.charge_in_break_started = True
+                        while e.current_travel:
+                            event_to_finish_popped = e.pop_future_event()
+                            action_needed_last_main_event = self.handle_event_and_update_env(
+                                event_to_finish_popped)
+                        if not action_needed_last_main_event:
+                            self.perform_charging_during_break()
+
             next_event = None
             # if there are serviceable queued events, take care of them first.
             if (retrieval_ok or delivery_ok) and\
@@ -314,6 +330,24 @@ class SlapCore(gym.Env):
             self.print("legal actions for " + self.decision_mode +
                        " order: " + str(self.legal_actions))
         return False
+
+    def time_check_charging(self):
+        s, e = self.state, self.events
+        next_event_peek = e.running[0]
+        state_time = s.time
+        s.set_main_event_time(next_event_peek)
+        next_event_peek_time = s.next_main_event_time
+        time_delta = next_event_peek_time - state_time
+        # if time_delta > self.rs_manager.highest_time_delta:
+        #    self.rs_manager.highest_time_delta = time_delta
+        max_duration = self.state.agv_manager.max_charging_time_frame
+        if (time_delta > max_duration) and (state_time != 0):
+            if self.state.agv_manager.charge_in_break_started == False:
+                self.state.agv_manager.full_time_delta = time_delta
+                self.state.agv_manager.time_of_next_main_event = next_event_peek_time
+            return True
+        else:
+            return False
 
     # @profile
     def handle_event_and_update_env(self, next_event: Event) -> bool:
@@ -859,6 +893,22 @@ class SlapCore(gym.Env):
             assert self.orders.n_orders
         if self.orders.generate_orders is False:
             assert self.orders.order_list
+
+    def perform_charging_during_break(self):
+        self.perform_battery_sort()
+
+    def recharge_during_break(self):
+        agvm = self.state.agv_manager
+        while agvm.n_free_agvs:
+            lowest_battery = np.inf
+            idx = None
+            for agv in agvm.agv_index:
+                if (agvm.agv_index[agv].battery < lowest_battery and
+                        agvm.agv_index[agv].free and agvm.agv_index[agv].battery < 80):
+                    idx = agvm.agv_index[agv].id
+                    lowest_battery = agvm.agv_index[agv].battery
+            agv = agvm.agv_index[idx]
+            agv.battery = 80
 
     def __deepcopy__(self, memo):
         return faster_deepcopy(self, memo)
