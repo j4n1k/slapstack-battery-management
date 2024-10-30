@@ -133,12 +133,12 @@ if __name__ == '__main__':
     partitions_path = get_partitions_path("wepastacks_bm")
     delete_partitions_data(partitions_path)
     # parallel charging strat
-    n_partitions = 20
+    n_partitions = 14
     for pt in range(n_partitions):
         params = SimulationParameters(
             use_case="wepastacks_bm",
             use_case_n_partitions=n_partitions,
-            use_case_partition_to_use=pt,
+            use_case_partition_to_use=4,
             n_agvs=40,
             generate_orders=False,
             verbose=False,
@@ -152,7 +152,8 @@ if __name__ == '__main__':
             pallet_shift_penalty_factor=20,  # in seconds
             compute_feature_trackers=True,
             charging_thresholds=[40, 50, 60, 70, 80],
-            partition_by_week=True
+            partition_by_week=True,
+            charge_during_breaks=True
         )
         parallelize_heterogeneously(
             [run_episode] * n_charging_strategies,

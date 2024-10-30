@@ -38,7 +38,9 @@ class LowTHChargePolicy(ChargingStrategy):
         self.type = "go_charging"
 
     def get_action(self, state: 'State', agv_id: int) -> int:
-        go_charging = state.agv_manager.charge_needed(False, agv_id)
+        # go_charging = state.agv_manager.charge_needed(False, agv_id)
+        agv = state.agv_manager.agv_index[agv_id]
+        go_charging = agv.battery <= 20
         if go_charging:
             return 1
         else:

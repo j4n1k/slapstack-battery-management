@@ -241,7 +241,114 @@ class TestSlapEnv(TestCase):
                                          steps_per_episode=None)
 
         assert final_state.trackers.average_service_time == 463.81978959254207
-    #
+
+
+    def test_charge_during_breaks(self):
+        # Charging Action from ChargingPolicy gets overwritten by CombinedChargingPolicy
+        params = SimulationParameters(
+            use_case="wepastacks_bm",
+            use_case_n_partitions=20,
+            use_case_partition_to_use=0,
+            n_agvs=40,
+            generate_orders=False,
+            verbose=False,
+            resetting=False,
+            initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+            pure_lanes=True,
+            n_levels=3,
+            # https://logisticsinside.eu/speed-of-warehouse-trucks/
+            agv_speed=2,
+            unit_distance=1.4,
+            pallet_shift_penalty_factor=20,  # in seconds
+            compute_feature_trackers=True,
+            charging_thresholds=[40, 50, 60, 70, 80],
+            battery_capacity=80,
+            charge_during_breaks=True
+        )
+
+        final_state: State = self.run_episode(simulation_parameters=params,
+                                         print_freq=100000,
+                                         log_dir='./logs/tests/partitioning/go_charging',
+                                         charging_check_strategy=CombinedChargingPolicy(20, 70),
+                                         testing=True,
+                                         action_converters=[BatchFIFO(),
+                                                            ClosestOpenLocation(very_greedy=False),
+                                                            FixedChargePolicy(70)],
+                                         steps_per_episode=None)
+
+        assert final_state.trackers.average_service_time != 463.81978959254207
+
+    def test_charge_during_breaks_week(self):
+        # Charging Action from ChargingPolicy gets overwritten by CombinedChargingPolicy
+        params = SimulationParameters(
+            use_case="wepastacks_bm",
+            use_case_n_partitions=20,
+            use_case_partition_to_use=4,
+            n_agvs=40,
+            generate_orders=False,
+            verbose=False,
+            resetting=False,
+            initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+            pure_lanes=True,
+            n_levels=3,
+            # https://logisticsinside.eu/speed-of-warehouse-trucks/
+            agv_speed=2,
+            unit_distance=1.4,
+            pallet_shift_penalty_factor=20,  # in seconds
+            compute_feature_trackers=True,
+            charging_thresholds=[40, 50, 60, 70, 80],
+            battery_capacity=80,
+            charge_during_breaks=True,
+            partition_by_week=True
+        )
+
+        final_state: State = self.run_episode(simulation_parameters=params,
+                                         print_freq=100000,
+                                         log_dir='./logs/tests/partitioning/go_charging',
+                                         charging_check_strategy=CombinedChargingPolicy(20, 70),
+                                         testing=True,
+                                         action_converters=[BatchFIFO(),
+                                                            ClosestOpenLocation(very_greedy=False),
+                                                            FixedChargePolicy(70)],
+                                         steps_per_episode=None)
+
+        assert final_state.trackers.average_service_time != 463.81978959254207
+
+    def test_charging_week(self):
+        # Charging Action from ChargingPolicy gets overwritten by CombinedChargingPolicy
+        params = SimulationParameters(
+            use_case="wepastacks_bm",
+            use_case_n_partitions=20,
+            use_case_partition_to_use=4,
+            n_agvs=40,
+            generate_orders=False,
+            verbose=False,
+            resetting=False,
+            initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+            pure_lanes=True,
+            n_levels=3,
+            # https://logisticsinside.eu/speed-of-warehouse-trucks/
+            agv_speed=2,
+            unit_distance=1.4,
+            pallet_shift_penalty_factor=20,  # in seconds
+            compute_feature_trackers=True,
+            charging_thresholds=[40, 50, 60, 70, 80],
+            battery_capacity=80,
+            partition_by_week=True
+        )
+
+        final_state: State = self.run_episode(simulation_parameters=params,
+                                         print_freq=100000,
+                                         log_dir='./logs/tests/partitioning/go_charging',
+                                         charging_check_strategy=CombinedChargingPolicy(20, 70),
+                                         testing=True,
+                                         action_converters=[BatchFIFO(),
+                                                            ClosestOpenLocation(very_greedy=False),
+                                                            FixedChargePolicy(70)],
+                                         steps_per_episode=None)
+
+        assert final_state.trackers.average_service_time != 463.81978959254207
+
     def test_go_charging(self):
         # Step handles the charge or not charge decision (binary). Charging duration is fixed to upper th
         params = SimulationParameters(
