@@ -11,7 +11,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 from stable_baselines3.common.callbacks import BaseCallback
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
-from experiments.experiment_commons import ExperimentLogger
+from experiment_commons import ExperimentLogger
 from slapstack import SlapEnv
 from slapstack.interface_templates import SimulationParameters
 from slapstack_controls.output_converters import FeatureConverterCharging
