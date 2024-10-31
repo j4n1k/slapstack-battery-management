@@ -6,11 +6,11 @@ from typing import List, Optional
 import wandb
 from datetime import datetime
 
+from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 from stable_baselines3.common.callbacks import BaseCallback
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
-
 from experiments.experiment_commons import ExperimentLogger
 from slapstack import SlapEnv
 from slapstack.interface_templates import SimulationParameters
@@ -124,7 +124,8 @@ def main(cfg: DictConfig) -> None:
         pallet_shift_penalty_factor=20,
         compute_feature_trackers=True,
         charging_thresholds=list(cfg.env.charging_thresholds),
-        battery_capacity=cfg.env.battery_capacity
+        battery_capacity=cfg.env.battery_capacity,
+        partition_by_week=True
     )
 
     # Feature list for state representation
@@ -145,9 +146,22 @@ def main(cfg: DictConfig) -> None:
             log_dir=cfg.logging.log_dir,
             partitions=[pt],
             reward_setting=1,
-        ) for pt in cfg.env.partitions
+        ) for pt in cfg.env.train_partitions
     ])
     vec_env = VecMonitor(vec_env)
+
+    eval_env = SubprocVecEnv([
+        make_env(
+            sim_params=params,
+            log_frequency=1000,
+            nr_zones=3,
+            logfile_name='PPO_eval',
+            log_dir=cfg.logging.eval_log_dir,
+            partitions=[pt],
+            reward_setting=1,
+        ) for pt in cfg.env.eval_partitions
+    ])
+    eval_env = VecMonitor(eval_env)
 
     # Initialize PPO model
     model = MaskablePPO(
@@ -166,13 +180,25 @@ def main(cfg: DictConfig) -> None:
         ent_coef=cfg.training.ent_coef
     )
 
+    # Callbacks
+    eval_callback = MaskableEvalCallback(
+        eval_env=eval_env,
+        eval_freq=cfg.evaluation.eval_freq,
+        n_eval_episodes=cfg.evaluation.n_eval_episodes,
+        best_model_save_path=cfg.logging.best_model_dir,
+        log_path=cfg.logging.eval_log_dir,
+        deterministic=True,
+        verbose=1
+    )
+
+    wandb_callback = WandBCallback(log_interval=cfg.logging.log_interval)
     # Training
     try:
         model.learn(
             total_timesteps=cfg.training.total_timesteps,
             progress_bar=False,
             log_interval=cfg.logging.log_interval,
-            callback=WandBCallback(log_interval=cfg.logging.log_interval),
+            callback=[wandb_callback, eval_callback],
             tb_log_name=cfg.logging.run_name
         )
 

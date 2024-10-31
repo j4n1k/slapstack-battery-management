@@ -6,7 +6,7 @@ from stable_baselines3 import DQN, PPO, TD3, SAC
 from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
 from stable_baselines3.common.utils import obs_as_tensor
 import torch as th
-from stable_baselines3.common.vec_env import VecEnv, sync_envs_normalization
+from stable_baselines3.common.vec_env import VecEnv, sync_envs_normalization, SubprocVecEnv, VecMonitor
 from sb3_contrib.common.maskable.evaluation import evaluate_policy
 
 import gymnasium as gym
@@ -256,3 +256,77 @@ class MaskableEvalCallback(EvalCallback):
                 continue_training = continue_training and self._on_event()
 
         return continue_training
+
+
+class ParallelMaskableEvalCallback(MaskableEvalCallback):
+    """Custom maskable evaluation callback that supports parallel evaluation environments."""
+
+    def __init__(
+            self,
+            eval_env: Union[SubprocVecEnv, VecMonitor],
+            eval_freq: int = 1000,
+            n_eval_episodes: int = 5,
+            best_model_save_path: Optional[str] = None,
+            log_path: Optional[str] = None,
+            deterministic: bool = True,
+            verbose: int = 1,
+            prefix: str = "eval"
+    ):
+        super().__init__(
+            eval_env=eval_env,
+            eval_freq=eval_freq,
+            n_eval_episodes=n_eval_episodes,
+            best_model_save_path=best_model_save_path,
+            log_path=log_path,
+            deterministic=deterministic,
+            verbose=verbose
+        )
+        self.prefix = prefix
+
+    def _on_step(self) -> bool:
+        if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
+            # Sync training statistics across processes
+            sync_training_stats = {
+                "timesteps": self.num_timesteps,
+                "episodes": self._episode_num
+            }
+
+            # Conduct maskable evaluations across all parallel environments
+            episode_rewards, episode_lengths = evaluate_policy(
+                self.model,
+                self.eval_env,
+                n_eval_episodes=self.n_eval_episodes,
+                render=False,
+                deterministic=self.deterministic,
+                return_episode_rewards=True,
+                warn=False,
+            )
+
+            # Calculate mean reward and length across all environments
+            mean_reward = np.mean(episode_rewards)
+            std_reward = np.std(episode_rewards)
+            mean_length = np.mean(episode_lengths)
+
+            # Log to WandB
+            wandb.log({
+                f"{self.prefix}/mean_reward": mean_reward,
+                f"{self.prefix}/std_reward": std_reward,
+                f"{self.prefix}/mean_ep_length": mean_length,
+                f"{self.prefix}/timesteps": self.num_timesteps
+            })
+
+            # Save best model
+            if self.best_model_save_path is not None:
+                if mean_reward > self.best_mean_reward:
+                    self.best_mean_reward = mean_reward
+                    self.model.save(os.path.join(self.best_model_save_path, "best_model"))
+                    if self.verbose > 0:
+                        print(f"Saving new best model to {self.best_model_save_path}")
+
+            # Log to tensorboard and stdout
+            if self.verbose > 0:
+                print(f"Eval num_timesteps={self.num_timesteps}, "
+                      f"episode_reward={mean_reward:.2f} +/- {std_reward:.2f}")
+                print(f"Episode length: {mean_length:.2f}")
+
+        return True

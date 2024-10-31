@@ -11,13 +11,14 @@ env:
   n_partitions: 20
   n_agvs: 40
   seed: null  # Set to integer for reproducibility
-  partitions: [0, 2]  # Partitions to use in parallel
+  train_partitions: [0, 2, 4, 6, 8, 10, 12]  # Partitions to use in parallel
+  eval_partitions: [1, 3, 5, 7, 9, 11, 13]
   charging_thresholds: [0, 30, 40, 50, 60, 70, 80]
   battery_capacity: 80
 
 training:
   device: "cpu"
-  total_timesteps: 100000
+  total_timesteps: 2000000
   learning_rate: 3e-4
   n_steps: 2048
   batch_size: 64
@@ -27,12 +28,19 @@ training:
   clip_range: 0.2
   ent_coef: 0.01
 
+evaluation:
+  eval_freq: 40000
+  n_eval_episodes: 1  # Number of evaluation episodes
+  deterministic: true
+
 logging:
   log_dir: "./logs"
   tensorboard_dir: "./tensorboard_logs"
   model_dir: "./models"
   log_interval: 1
   run_name: "${now:%Y%m%d_%H%M%S}_ppo_test"
+  eval_log_dir: "./eval_logs"
+  best_model_dir: "./best_models"
 
 hydra:
   run:
