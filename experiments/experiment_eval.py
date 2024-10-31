@@ -32,7 +32,7 @@ api = wandb.Api()
 # Specify your project and run ID
 entity = "j4b"        # Your WandB username or team name
 project = "rl-battery-management" # Your WandB project name
-run_id = "5ci1627k" # "f8l4u7x4" # "waj0fjc3"         # ID of the specific run
+run_id = "q7y9vy3q" # "f8l4u7x4" # "waj0fjc3"         # ID of the specific run
 
 # Retrieve the run object
 run = api.run(f"{entity}/{project}/runs/{run_id}")
@@ -40,11 +40,20 @@ run = api.run(f"{entity}/{project}/runs/{run_id}")
 n_cs = 20
 num_partitions = 14
 tar_name = 'experiment_data3'
-root_dir = f'./result_data_charging_wepa/{n_cs}cs/charge_in_breaks'
+root_dir = f'./result_data_charging_wepa/{n_cs}cs/cib'
 root_dir_extraction = f'{root_dir}/result_data_remote3'
 
 sns.set_style("whitegrid")
 sns.set_context("talk")
+
+hex_colors = ['#144246',
+              #'#69657e',
+              '#338470',
+              '#a6874e',
+              #'#FFFF33', '#FFD801', '#FFDF00',
+              '#f2be25', '#e8dcb9']
+pal = sns.color_palette(hex_colors, desat=1)
+sns.palplot(pal)
 
 shortnames = {
     'COL': 'COL',
@@ -151,6 +160,20 @@ for pt in partitions:
         if df is not None:
             dfs_d[pt].append(df)
 
+_, ax = plt.subplots(figsize=(8, 4.5))
+ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
+
+palette = cycle(pal)
+for df in dfs_d[0]:
+    ax = sns.lineplot(ax=ax, x='kpi__makespan', y='kpi__average_service_time',
+                      label=df.name, color=next(palette), data=df)
+
+    ax.legend(title='Partition')
+    # ax.set_xlim((-5000, xlim + 20000))
+    ax.set_xlabel('Time (in Seconds)')
+    ax.set_ylabel('Average Service Time\n(in Seconds)')
+sns.move_legend(ax, "upper left", bbox_to_anchor=(1, 1))
+ax.plot()
 
 def gen_result_table(dfs_d, value, mode):
     list_of_dfs = []
@@ -213,6 +236,7 @@ def gen_latex_tabel(subset_min, th_comp_df):
 
 thresholds = [30, 40, 50, 60, 70, 80]
 result_df = gen_result_table(dfs_d, "kpi__average_service_time", "last")
+
 # Initialize lists to store the results
 avg_service_times = []
 max_service_times = []
@@ -220,7 +244,7 @@ ppo_results = {i: 0 for i in range(num_partitions)}
 # Loop through each partition to retrieve and compute statistics
 for i in range(num_partitions):
     # Construct the key for the specific partition
-    key = f"Evaluation/{i}/Servicetime"
+    key = f"logs/Evaluation/{i}/Servicetime"
 
     # Retrieve history for the current partition
     history_df = run.history(keys=[key])

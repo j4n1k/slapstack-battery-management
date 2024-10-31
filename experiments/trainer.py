@@ -195,6 +195,7 @@ def run_evaluation_tensorboard(cfg, model, storage_strategy, state_converter=Tru
             use_case=cfg.sim_params.use_case,
             use_case_n_partitions=cfg.sim_params.use_case_n_partitions,
             use_case_partition_to_use=pt_idx,
+            partition_by_week=cfg.sim_params.partition_by_week,
             n_agvs=cfg.sim_params.n_agvs,
             generate_orders=cfg.sim_params.generate_orders,
             verbose=cfg.sim_params.verbose,
@@ -207,7 +208,7 @@ def run_evaluation_tensorboard(cfg, model, storage_strategy, state_converter=Tru
             compute_feature_trackers=cfg.sim_params.compute_feature_trackers,
             n_levels=cfg.sim_params.n_levels,
             charging_thresholds=list(cfg.task.task.charging_thresholds),
-            # charge_during_breaks=True
+            charge_during_breaks=cfg.sim_params.charge_during_breaks
         )
 
         parametrization_failure, episode_results = run_episode(
@@ -300,6 +301,7 @@ def main(cfg: DictConfig):
         use_case=cfg.sim_params.use_case,
         use_case_n_partitions=cfg.sim_params.use_case_n_partitions,
         use_case_partition_to_use=cfg.sim_params.use_case_partition_to_use,
+        partition_by_week=cfg.sim_params.partition_by_week,
         n_agvs=cfg.sim_params.n_agvs,
         generate_orders=cfg.sim_params.generate_orders,
         verbose=cfg.sim_params.verbose,
@@ -311,7 +313,8 @@ def main(cfg: DictConfig):
         pallet_shift_penalty_factor=cfg.sim_params.pallet_shift_penalty_factor,
         compute_feature_trackers=cfg.sim_params.compute_feature_trackers,
         n_levels=cfg.sim_params.n_levels,
-        charging_thresholds=th
+        charging_thresholds=th,
+        charge_during_breaks=cfg.sim_params.charge_during_breaks
     )
 
     # Create environment
@@ -341,7 +344,10 @@ def main(cfg: DictConfig):
     if cfg.model.agent.name == "PPO":
         env = ActionMasker(env, mask_fn)
         eval_env = ActionMasker(eval_env, mask_fn)
-        model = MaskablePPO(MaskableActorCriticPolicy, env, verbose=1, tensorboard_log="./dqn_charging_tensorboard/",
+        model = MaskablePPO(MaskableActorCriticPolicy, env,
+                            verbose=1,
+                            tensorboard_log="./dqn_charging_tensorboard/",
+                            ent_coef=cfg.model.agent.model_params.ent_coef,
                             device="cpu")
     elif cfg.model.agent.name == "Threshold":
         model = FixedChargePolicy(charging_threshold=cfg.model.agent.model_params.threshold)

@@ -161,7 +161,7 @@ class SimulationParameters:
             self.n_skus_in = use_case.sku_in_counts
             self.n_skus_out = use_case.sku_out_counts
             self.sku_period = use_case.current_week
-            self.desired_fill_level = None
+            self.desired_fill_level = desired_fill_level
             self.shape = use_case.layout.shape + (use_case.n_levels,)
             self.door_to_door = door_to_door
             self.n_forks = agv_forks
@@ -440,7 +440,7 @@ class SimulationParameters:
         self.n_skus_in = use_case.sku_in_counts
         self.n_skus_out = use_case.sku_out_counts
         self.sku_period = use_case.current_week
-        self.desired_fill_level = None
+        self.desired_fill_level = self.desired_fill_level
         self.shape = use_case.layout.shape + (use_case.n_levels,)
 
 

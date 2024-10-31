@@ -1,0 +1,43 @@
+# config/test_config.yaml
+defaults:
+  - _self_
+  - override hydra/job_logging: none
+
+wandb:
+  project_name: "subproc-vec-test"
+
+env:
+  use_case: "wepastacks_bm"
+  n_partitions: 20
+  n_agvs: 40
+  seed: null  # Set to integer for reproducibility
+  partitions: [0, 2]  # Partitions to use in parallel
+  charging_thresholds: [0, 30, 40, 50, 60, 70, 80]
+  battery_capacity: 80
+
+training:
+  device: "cpu"
+  total_timesteps: 100000
+  learning_rate: 3e-4
+  n_steps: 2048
+  batch_size: 64
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.01
+
+logging:
+  log_dir: "./logs"
+  tensorboard_dir: "./tensorboard_logs"
+  model_dir: "./models"
+  log_interval: 1
+  run_name: "${now:%Y%m%d_%H%M%S}_ppo_test"
+
+hydra:
+  run:
+    dir: ./outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: ./multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  job:
+    chdir: True

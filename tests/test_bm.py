@@ -5,6 +5,12 @@ from math import floor
 from os.path import join
 from unittest import TestCase
 
+from gymnasium.vector import AsyncVectorEnv
+from sb3_contrib import MaskablePPO
+from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
+from sb3_contrib.common.wrappers import ActionMasker
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor
+
 from experiments.experiment_commons import run_episode, get_episode_env, get_partitions_path, delete_partitions_data, \
     ExperimentLogger, LoopControl
 from slapstack import SlapCore, SlapEnv
@@ -16,6 +22,7 @@ from slapstack.helpers import print_3d_np
 from slapstack.interface_input import Input
 from slapstack.interface_templates import SimulationParameters
 from slapstack_controls.charging_policies import FixedChargePolicy, LowTHChargePolicy, CombinedChargingPolicy
+from slapstack_controls.output_converters import FeatureConverterCharging
 from slapstack_controls.storage_policies import ConstantTimeGreedyPolicy, ClosestOpenLocation, BatchFIFO
 
 
@@ -416,6 +423,465 @@ class TestSlapEnv(TestCase):
                                                             ])
         assert final_state.trackers.average_service_time == 463.81978959254207
 
+    def test_order_generator(self):
+        # Step handles the charging duration. Go Charging is fixed to lower th
+        params = SimulationParameters(
+            use_case="wepastacks_bm",
+            use_case_n_partitions=20,
+            use_case_partition_to_use=0,
+            n_agvs=5,
+            generate_orders=True,
+            verbose=False,
+            resetting=False,
+            initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+            pure_lanes=True,
+            n_levels=3,
+            # https://logisticsinside.eu/speed-of-warehouse-trucks/
+            agv_speed=2,
+            unit_distance=1.4,
+            pallet_shift_penalty_factor=20,  # in seconds
+            compute_feature_trackers=True,
+            charging_thresholds=[40, 50, 60, 70, 80],
+            battery_capacity=80,
+            n_rows=20,
+            n_columns=20,
+            n_sources=5,
+            n_sinks=5,
+            desired_fill_level=0.3
+        )
+
+        final_state: State = self.run_episode(simulation_parameters=params,
+                                         print_freq=1000,
+                                         log_dir='./logs/tests/partitioning/charging',
+                                         charging_check_strategy=FixedChargePolicy(30),
+                                         testing=True,
+                                         steps_per_episode=120,
+                                         action_converters=[BatchFIFO(),
+                                                            ClosestOpenLocation(very_greedy=False),
+                                                            LowTHChargePolicy(20)
+                                                            ])
+        assert final_state.trackers.average_service_time != 463.81978959254207
+
+    def test_dummy_env(self):
+        params = SimulationParameters(
+            use_case="wepastacks_bm",
+            use_case_n_partitions=20,
+            use_case_partition_to_use=0,
+            n_agvs=40,
+            generate_orders=False,
+            verbose=False,
+            resetting=False,
+            initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+            pure_lanes=True,
+            n_levels=3,
+            # https://logisticsinside.eu/speed-of-warehouse-trucks/
+            agv_speed=2,
+            unit_distance=1.4,
+            pallet_shift_penalty_factor=20,  # in seconds
+            compute_feature_trackers=True,
+            charging_thresholds=[40, 50, 60, 70, 80],
+            battery_capacity=80
+        )
+
+        def get_rl_env(sim_parameters: SimulationParameters,
+                       log_frequency: int,
+                       nr_zones: int,
+                       logfile_name: str,
+                       log_dir: str,
+                       partitions=None,
+                       reward_setting=1,
+                       seed=None):
+            if partitions is None:
+                partitions = [None]
+            if seed is None:
+                seed = np.random.randint(0, 100000)
+            seeds = [seed]
+
+            action_converters = [BatchFIFO(),
+                                 ClosestOpenLocation(very_greedy=False),
+                                 FixedChargePolicy(100)]
+
+            feature_list = ["n_depleted_agvs", "avg_battery", "utilization",
+                            "queue_len_charging_station", "global_fill_level",
+                            "curr_agv_battery", "dist_to_cs",
+                            "queue_len_retrieval_orders", "queue_len_delivery_orders"]
+
+            decision_mode = "charging_check"
+
+            return SlapEnv(
+                sim_parameters,
+                seeds,
+                partitions,
+                logger=ExperimentLogger(
+                    filepath=log_dir,
+                    n_steps_between_saves=log_frequency,
+                    nr_zones=nr_zones,
+                    logfile_name=f"{logfile_name}_{seed}"),
+                state_converter=FeatureConverterCharging(
+                    feature_list,
+                    reward_setting=reward_setting,
+                    decision_mode=decision_mode),
+                action_converters=action_converters
+            )
+
+        def mask_fn(env):
+            """Get action mask for environment"""
+            if hasattr(env, 'valid_action_mask'):
+                return env.valid_action_mask()
+            if hasattr(env, 'env'):
+                return mask_fn(env.env)
+            if hasattr(env, 'envs'):
+                # For vectorized environments, return mask for first env
+                return mask_fn(env.envs[0])
+            raise ValueError("Environment doesn't have valid_action_mask method")
+
+        def make_env(sim_params, log_frequency, nr_zones, logfile_name,
+                     log_dir, partitions, reward_setting, seed=None):
+            def _init():
+                env = get_rl_env(
+                    sim_parameters=sim_params,
+                    log_frequency=log_frequency,
+                    nr_zones=nr_zones,
+                    log_dir=log_dir,
+                    logfile_name=logfile_name,
+                    partitions=partitions,
+                    reward_setting=reward_setting,
+                    seed=seed
+                )
+                # Wrap with ActionMasker
+                env = ActionMasker(env, mask_fn)
+                return env
+
+            return _init
+
+        # Create vectorized environment with proper seeding
+        n_envs = 4
+        #random_seeds = np.random.randint(0, 100000, size=n_envs)
+
+        # Create vectorized environment using DummyVectorEnv instead of AsyncVectorEnv
+        vec_env = DummyVecEnv([
+            make_env(
+                params,
+                log_frequency=1000,
+                nr_zones=3,
+                logfile_name='PPO_test',
+                log_dir='./logs/tests/partitioning/charging',
+                partitions=[pt],
+                reward_setting=1,
+            ) for pt in [0, 2]
+        ])
+        vec_env = VecMonitor(vec_env)
+        # Initialize PPO with the vectorized environment
+        model = MaskablePPO(
+            MaskableActorCriticPolicy,
+            vec_env,
+            verbose=1,
+            tensorboard_log="./dqn_charging_tensorboard/",
+            device="cpu",
+            learning_rate=3e-4,
+            n_steps=2048,
+            batch_size=64,
+            n_epochs=10,
+            gamma=0.99,
+            gae_lambda=0.95,
+            clip_range=0.2,
+            ent_coef=0.01
+        )
+
+        # Test the environment setup
+        obs = vec_env.reset()
+        try:
+            # Verify action masking works
+            masks = vec_env.env_method('action_masks')
+            print("Action masks verified:", [m.shape for m in masks])
+        except Exception as e:
+            print("Error testing masks:", e)
+        model.learn(
+            total_timesteps=50000,
+            progress_bar=False,
+            log_interval=1,
+            tb_log_name=f"PPO_test_parallel"
+        )
+        # eval_env = ActionMasker(eval_env, mask_fn)
+        # vec_env = AsyncVectorEnv([lambda i=i: get_env(
+        #     sim_parameters=sim_params,
+        #     log_frequency=1000,
+        #     nr_zones=3,
+        #     log_dir=cfg.experiment.log_dir,
+        #     logfile_name=f"{cfg.model.agent.name}_{cfg.experiment.id}_{i}",  # Ensure unique logfile name
+        #     reward_setting=cfg.task.task.reward_setting,
+        #     partitions=[cfg.experiment.t_pt],
+        #     cfg=cfg
+        # ) for i in range(3)])
+    def test_sub_proc_env(self):
+        params = SimulationParameters(
+            use_case="wepastacks_bm",
+            use_case_n_partitions=20,
+            use_case_partition_to_use=0,
+            n_agvs=40,
+            generate_orders=False,
+            verbose=False,
+            resetting=False,
+            initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+            pure_lanes=True,
+            n_levels=3,
+            # https://logisticsinside.eu/speed-of-warehouse-trucks/
+            agv_speed=2,
+            unit_distance=1.4,
+            pallet_shift_penalty_factor=20,  # in seconds
+            compute_feature_trackers=True,
+            charging_thresholds=[40, 50, 60, 70, 80],
+            battery_capacity=80
+        )
+
+        def get_rl_env(sim_parameters: SimulationParameters,
+                       log_frequency: int,
+                       nr_zones: int,
+                       logfile_name: str,
+                       log_dir: str,
+                       partitions=None,
+                       reward_setting=1,
+                       seed=None):
+            if partitions is None:
+                partitions = [None]
+            if seed is None:
+                seed = np.random.randint(0, 100000)
+            seeds = [seed]
+
+            action_converters = [BatchFIFO(),
+                                 ClosestOpenLocation(very_greedy=False),
+                                 FixedChargePolicy(100)]
+
+            feature_list = ["n_depleted_agvs", "avg_battery", "utilization",
+                            "queue_len_charging_station", "global_fill_level",
+                            "curr_agv_battery", "dist_to_cs",
+                            "queue_len_retrieval_orders", "queue_len_delivery_orders"]
+
+            decision_mode = "charging_check"
+
+            return SlapEnv(
+                sim_parameters,
+                seeds,
+                partitions,
+                logger=ExperimentLogger(
+                    filepath=log_dir,
+                    n_steps_between_saves=log_frequency,
+                    nr_zones=nr_zones,
+                    logfile_name=f"{logfile_name}_{seed}"),
+                state_converter=FeatureConverterCharging(
+                    feature_list,
+                    reward_setting=reward_setting,
+                    decision_mode=decision_mode),
+                action_converters=action_converters
+            )
+
+        def make_env(sim_params, log_frequency, nr_zones, logfile_name,
+                     log_dir, partitions, reward_setting, seed=None):
+            def _init():
+                env = get_rl_env(
+                    sim_parameters=sim_params,
+                    log_frequency=log_frequency,
+                    nr_zones=nr_zones,
+                    log_dir=log_dir,
+                    logfile_name=logfile_name,
+                    partitions=partitions,
+                    reward_setting=reward_setting,
+                    seed=seed
+                )
+                # Wrap with ActionMasker
+                return env
+
+            return _init
+
+        # Create vectorized environment with proper seeding
+        n_envs = 4
+        # random_seeds = np.random.randint(0, 100000, size=n_envs)
+
+        # Create vectorized environment using DummyVectorEnv instead of AsyncVectorEnv
+        vec_env = SubprocVecEnv([
+            make_env(
+                params,
+                log_frequency=1000,
+                nr_zones=3,
+                logfile_name='PPO_test',
+                log_dir='./logs/tests/partitioning/charging',
+                partitions=[pt],
+                reward_setting=1,
+            ) for pt in [0, 2]
+        ])
+        vec_env = VecMonitor(vec_env)
+        # Initialize PPO with the vectorized environment
+        model = MaskablePPO(
+            MaskableActorCriticPolicy,
+            vec_env,
+            verbose=1,
+            tensorboard_log="./dqn_charging_tensorboard/",
+            device="cpu",
+            learning_rate=3e-4,
+            n_steps=2048,
+            batch_size=64,
+            n_epochs=10,
+            gamma=0.99,
+            gae_lambda=0.95,
+            clip_range=0.2,
+            ent_coef=0.01
+        )
+
+        # Test the environment setup
+        obs = vec_env.reset()
+        try:
+            # Verify action masking works
+            masks = vec_env.env_method('action_masks')
+            print("Action masks verified:", [m.shape for m in masks])
+        except Exception as e:
+            print("Error testing masks:", e)
+        model.learn(
+            total_timesteps=100000,
+            progress_bar=False,
+            log_interval=1,
+            tb_log_name=f"PPO_test_parallel"
+        )
+
+    def test_async_env(self):
+        params = SimulationParameters(
+            use_case="wepastacks_bm",
+            use_case_n_partitions=20,
+            use_case_partition_to_use=0,
+            n_agvs=40,
+            generate_orders=False,
+            verbose=False,
+            resetting=False,
+            initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+            pure_lanes=True,
+            n_levels=3,
+            # https://logisticsinside.eu/speed-of-warehouse-trucks/
+            agv_speed=2,
+            unit_distance=1.4,
+            pallet_shift_penalty_factor=20,  # in seconds
+            compute_feature_trackers=True,
+            charging_thresholds=[40, 50, 60, 70, 80],
+            battery_capacity=80
+        )
+
+        def get_rl_env(sim_parameters: SimulationParameters,
+                       log_frequency: int,
+                       nr_zones: int,
+                       logfile_name: str,
+                       log_dir: str,
+                       partitions=None,
+                       reward_setting=1,
+                       seed=None):
+            if partitions is None:
+                partitions = [None]
+            if seed is None:
+                seed = np.random.randint(0, 100000)
+            seeds = [seed]
+
+            action_converters = [BatchFIFO(),
+                                 ClosestOpenLocation(very_greedy=False),
+                                 FixedChargePolicy(100)]
+
+            feature_list = ["n_depleted_agvs", "avg_battery", "utilization",
+                            "queue_len_charging_station", "global_fill_level",
+                            "curr_agv_battery", "dist_to_cs",
+                            "queue_len_retrieval_orders", "queue_len_delivery_orders"]
+
+            decision_mode = "charging_check"
+
+            return SlapEnv(
+                sim_parameters,
+                seeds,
+                partitions,
+                logger=ExperimentLogger(
+                    filepath=log_dir,
+                    n_steps_between_saves=log_frequency,
+                    nr_zones=nr_zones,
+                    logfile_name=f"{logfile_name}_{seed}"),
+                state_converter=FeatureConverterCharging(
+                    feature_list,
+                    reward_setting=reward_setting,
+                    decision_mode=decision_mode),
+                action_converters=action_converters
+            )
+
+        def mask_fn(env):
+            """Get action mask for environment"""
+            if hasattr(env, 'valid_action_mask'):
+                return env.valid_action_mask()
+            if hasattr(env, 'env'):
+                return mask_fn(env.env)
+            if hasattr(env, 'envs'):
+                # For vectorized environments, return mask for first env
+                return mask_fn(env.envs[0])
+            raise ValueError("Environment doesn't have valid_action_mask method")
+
+        def make_env(sim_params, log_frequency, nr_zones, logfile_name,
+                     log_dir, partitions, reward_setting, seed=None):
+            def _init():
+                env = get_rl_env(
+                    sim_parameters=sim_params,
+                    log_frequency=log_frequency,
+                    nr_zones=nr_zones,
+                    log_dir=log_dir,
+                    logfile_name=logfile_name,
+                    partitions=partitions,
+                    reward_setting=reward_setting,
+                    seed=seed
+                )
+                # Wrap with ActionMasker
+                env = ActionMasker(env, mask_fn)
+                return env
+
+            return _init
+
+        # Create vectorized environment with proper seeding
+        n_envs = 4
+        #random_seeds = np.random.randint(0, 100000, size=n_envs)
+
+        # Create vectorized environment using DummyVectorEnv instead of AsyncVectorEnv
+        vec_env = AsyncVectorEnv([
+            make_env(
+                params,
+                log_frequency=1000,
+                nr_zones=3,
+                logfile_name='PPO_test',
+                log_dir='./logs/tests/partitioning/charging',
+                partitions=[pt],
+                reward_setting=1,
+            ) for pt in [0, 2, 4, 6, 8, 10]
+        ])
+
+        # Initialize PPO with the vectorized environment
+        model = MaskablePPO(
+            MaskableActorCriticPolicy,
+            vec_env,
+            verbose=1,
+            tensorboard_log="./dqn_charging_tensorboard/",
+            device="cpu",
+            learning_rate=3e-4,
+            n_steps=2048,
+            batch_size=64,
+            n_epochs=10,
+            gamma=0.99,
+            gae_lambda=0.95,
+            clip_range=0.2,
+            ent_coef=0.01
+        )
+
+        # Test the environment setup
+        obs = vec_env.reset()
+        try:
+            # Verify action masking works
+            masks = vec_env.env_method('action_masks')
+            print("Action masks verified:", [m.shape for m in masks])
+        except Exception as e:
+            print("Error testing masks:", e)
+        model.learn(
+            total_timesteps=1000,
+            progress_bar=False,
+            log_interval=1,
+            tb_log_name=f"PPO_test_parallel"
+        )
     # def test_partition_cycling(self):
     #     partitions_path = get_partitions_path("wepastacks_bm")
     #     delete_partitions_data(partitions_path)
