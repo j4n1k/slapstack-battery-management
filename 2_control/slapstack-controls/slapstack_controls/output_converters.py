@@ -296,6 +296,7 @@ class FeatureConverter(OutputConverter):
 
 class FeatureConverterCharging(OutputConverter):
     def __init__(self, feature_list, decision_mode="charging", reward_setting=1):
+        self.util_last_step = 0
         self.decision_mode = decision_mode
         self.rewards = []
         self.feature_list = feature_list
@@ -501,6 +502,7 @@ class FeatureConverterCharging(OutputConverter):
         self.time_last_step = 0
         self.running_avg = 0
         self.rewards = []
+        self.util_last_step = 0
 
     def calculate_reward(self,
                          state: State,
@@ -565,7 +567,21 @@ class FeatureConverterCharging(OutputConverter):
                     mean_util = state.agv_manager.get_average_utilization() / state.time
                     mean_battery = state.agv_manager.get_average_agv_battery() / 100
                     return mean_util # - mean_battery
-
+            elif self.reward_setting == 5:
+                agv_id = state.current_agv
+                if not agv_id:
+                    return 0
+                else:
+                    self.n_observations += 1
+                    current_util = state.agv_manager.get_average_utilization() / state.time
+                    delta_util = self.util_last_step - current_util
+                    self.util_last_step = current_util
+                    self.running_avg += delta_util
+                    state.running_avg = self.running_avg
+                    self.rewards.append(delta_util)
+                    state.rewards = self.rewards
+                    # self.n_orders_last_step = n_orders_now
+                    return delta_util
         else:
             return 0
 

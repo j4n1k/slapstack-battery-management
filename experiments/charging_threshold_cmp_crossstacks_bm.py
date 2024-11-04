@@ -14,12 +14,12 @@ from slapstack.interface_templates import SimulationParameters
 from slapstack_controls.storage_policies import (ClassBasedPopularity,
                                                  ClassBasedCycleTime,
                                                  ConstantTimeGreedyPolicy,
-                                                 ClosestOpenLocation, BatchFIFO)
+                                                 ClosestOpenLocation, BatchFIFO, ShortestLeg, ClosestToDestination)
 
 from slapstack_controls.charging_policies import (FixedChargePolicy,
                                                   RandomChargePolicy,
                                                   FullChargePolicy,
-                                                  ChargingPolicy)
+                                                  ChargingPolicy, LowTHChargePolicy)
 
 
 def get_episode_env(sim_parameters: SimulationParameters,
@@ -35,7 +35,8 @@ def get_episode_env(sim_parameters: SimulationParameters,
             nr_zones=nr_zones,
             logfile_name=logfile_name),
         action_converters=[BatchFIFO(),
-                           ClosestOpenLocation(very_greedy=False)])
+                           ClosestToDestination(very_greedy=False),
+                           LowTHChargePolicy(20)])
 
 
 def _init_run_loop(simulation_parameters,
@@ -72,7 +73,7 @@ def run_episode(simulation_parameters: SimulationParameters,
             if env.done_during_init:
                 raise ValueError("Sim ended during init")
             raise ValueError
-        output, reward, loop_controls.done, info = env.step(action)
+        output, reward, loop_controls.done, info, _ = env.step(action)
         if print_freq and loop_controls.n_decisions % print_freq == 0:
             ExperimentLogger.print_episode_info(
                 charging_strategy.name, start, loop_controls.n_decisions,
@@ -99,13 +100,14 @@ def get_charging_strategies():
     charging_strategies = []
 
     charging_strategies += [
-        # FixedChargePolicy(40),
-        # FixedChargePolicy(50),
-        # FixedChargePolicy(60),
-        # FixedChargePolicy(70),
-        # FixedChargePolicy(80),
+        FixedChargePolicy(30),
+        FixedChargePolicy(40),
+        FixedChargePolicy(50),
+        FixedChargePolicy(60),
+        FixedChargePolicy(70),
+        FixedChargePolicy(80),
         # FixedChargePolicy(90),
-        FixedChargePolicy(100),
+        # FixedChargePolicy(100),
         # RandomChargePolicy([40, 50, 60, 70, 80], 1)
     ]
 
@@ -113,9 +115,10 @@ def get_charging_strategies():
 
 params = SimulationParameters(
     use_case="crossstacks_bm",
-    use_case_n_partitions=1,
+    use_case_n_partitions=2,
     use_case_partition_to_use=0,
-    n_agvs=21,
+    partition_by_day=True,
+    n_agvs=15,
     generate_orders=False,
     verbose=False,
     resetting=False,
@@ -131,7 +134,9 @@ params = SimulationParameters(
     door_to_door=True,
     # update_partial_paths=False,
     agv_forks=1,
-    charging_thresholds=[40, 50, 60, 70, 80]
+    charging_thresholds=[40, 50, 60, 70, 80],
+    charge_during_breaks=True,
+    battery_capacity=52
 )
 
 charging_strategies = get_charging_strategies()

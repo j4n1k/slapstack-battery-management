@@ -11,10 +11,10 @@ env:
   n_partitions: 20
   n_agvs: 40
   seed: null  # Set to integer for reproducibility
-  train_partitions: [0, 2, 4, 6, 8, 10, 12]  # Partitions to use in parallel
-  eval_partitions: [1, 3, 5, 7, 9, 11, 13]
+  train_partitions: [33, 34]  # Partitions to use in parallel
+  eval_partitions: [43, 44]
   charging_thresholds: [0, 30, 40, 50, 60, 70, 80]
-  battery_capacity: 80
+  battery_capacity: 52
 
 training:
   device: "cpu"
@@ -30,7 +30,7 @@ training:
 
 evaluation:
   eval_freq: 40000
-  n_eval_episodes: 1  # Number of evaluation episodes
+  n_eval_episodes: 3  # Number of evaluation episodes
   deterministic: true
 
 logging:

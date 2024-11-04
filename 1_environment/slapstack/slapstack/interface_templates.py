@@ -102,6 +102,7 @@ class SimulationParameters:
                  battery_charging_h: float = 80,  # 80
                  charging_thresholds: Union[list[int], Tuple[float, float]] = None,
                  partition_by_week: bool = False,
+                 partition_by_day: bool = False,
                  charge_during_breaks: bool = False
                  ):
 
@@ -139,6 +140,8 @@ class SimulationParameters:
             if use_case_n_partitions > 1:
                 if partition_by_week:
                     self.get_initial_partitions_data_by_week()
+                elif partition_by_day:
+                    self.get_initial_partitions_data_by_day()
                 else:
                     self.get_initial_partitions_data(use_case_n_partitions)
             use_case_partitions = self.partition_use_case(use_case_n_partitions)
@@ -348,6 +351,62 @@ class SimulationParameters:
 
             # Save partition data
             if max(fill_levels) <= 1:
+                partition_order_path = f"partitions/{pt}_partition_orders.json"
+                partition_pallets_path = f"partitions/{pt + 1}_partition_fill_lvl.json"
+
+                with open(join(root_dir, partition_pallets_path), 'w', encoding='utf8') as json_file:
+                    json.dump(skus, json_file, ensure_ascii=False)
+
+                with open(join(root_dir, partition_order_path), 'w', encoding='utf8') as json_file:
+                    json.dump(orders, json_file, ensure_ascii=False)
+
+                pt += 1
+
+    def get_initial_partitions_data_by_day(self):
+        import os
+        from copy import deepcopy
+
+        root_dir = sep.join([sep.join(
+            abspath(__file__).split(sep)[:-1]), "use_cases", self.use_case_name])
+
+        partition_dir = join(root_dir, "partitions")
+        if not os.path.exists(partition_dir):
+            os.makedirs(partition_dir)
+
+        skus_ini, _ = self.load_initial_skus(None)
+        order_data = self.load_orders(None)
+
+        # Group orders by week and day within each week
+        order_data_by_day = {}
+        for order in order_data:
+            week = order[-1]  # Assuming the week is the last item in the order tuple
+            time = order[2]  # Assuming time is the second-to-last item in the order tuple
+            day = time // 86400  # Calculate the day within the week (0 to 6)
+
+            if week not in order_data_by_day:
+                order_data_by_day[week] = {}
+            if day not in order_data_by_day[week]:
+                order_data_by_day[week][day] = []
+
+            order_data_by_day[week][day].append(order)
+
+        # Write the initial fill level to the first partition
+        initial_pallets_path = join(partition_dir, "0_partition_fill_lvl.json")
+        with open(initial_pallets_path, 'w', encoding='utf8') as json_file:
+            json.dump(skus_ini, json_file, ensure_ascii=False)
+
+        skus = deepcopy(skus_ini)
+        pt = 0
+
+        # Process each day's orders within each week and save them in separate files
+        for week, days in order_data_by_day.items():
+            for day, orders in days.items():
+                for order in orders:
+                    if order[0] == "retrieval":
+                        skus[order[1]] -= 1
+                    elif order[0] == "delivery":
+                        skus[order[1]] += 1
+                # Save each day's orders and the updated fill level as a separate partition
                 partition_order_path = f"partitions/{pt}_partition_orders.json"
                 partition_pallets_path = f"partitions/{pt + 1}_partition_fill_lvl.json"
 

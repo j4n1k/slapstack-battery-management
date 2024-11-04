@@ -1,3 +1,5 @@
+import os
+
 import hydra
 from omegaconf import DictConfig, OmegaConf
 import numpy as np
@@ -11,6 +13,8 @@ from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 from stable_baselines3.common.callbacks import BaseCallback
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
+from torch.utils.tensorboard import SummaryWriter
+
 from experiment_commons import ExperimentLogger
 from slapstack import SlapEnv
 from slapstack.interface_templates import SimulationParameters
@@ -19,7 +23,6 @@ from slapstack_controls.storage_policies import (
     ClosestOpenLocation, ConstantTimeGreedyPolicy, BatchFIFO
 )
 from slapstack_controls.charging_policies import FixedChargePolicy
-
 
 class WandBCallback(BaseCallback):
     def __init__(self, log_interval: int = 1):
@@ -125,7 +128,7 @@ def main(cfg: DictConfig) -> None:
         compute_feature_trackers=True,
         charging_thresholds=list(cfg.env.charging_thresholds),
         battery_capacity=cfg.env.battery_capacity,
-        partition_by_week=True
+        partition_by_day=True
     )
 
     # Feature list for state representation

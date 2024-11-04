@@ -13,17 +13,17 @@ from slapstack_controls.storage_policies import ShortestLeg
 def get_storage_strategies():
     storage_strategies = []
     storage_strategies += [
-        ClosestOpenLocation(very_greedy=False),
-        RandomOpenLocation(),
-        ClosestToNextRetrieval(very_greedy=False),
-        ClosestToDestination(very_greedy=False),
+        # ClosestOpenLocation(very_greedy=False),
+        # RandomOpenLocation(),
+        # ClosestToNextRetrieval(very_greedy=False),
+        # ClosestToDestination(very_greedy=False),
         ShortestLeg(very_greedy=False)
     ]
     return storage_strategies
 
 
 params = SimulationParameters(
-    use_case="crossstacks_bm",
+    use_case="crossstacks",
     use_case_n_partitions=1,
     use_case_partition_to_use=0,
     n_agvs=3,
@@ -42,7 +42,8 @@ params = SimulationParameters(
     door_to_door=True,
     # update_partial_paths=False,
     agv_forks=1,
-    charging_thresholds=[40, 50, 60, 70, 80]
+    charging_thresholds=[40, 50, 60, 70, 80],
+    battery_capacity=80000
 )
 
 if __name__ == '__main__':
@@ -50,7 +51,7 @@ if __name__ == '__main__':
     storage_policies = get_storage_strategies()
     n_strategies = len(storage_policies)
     constraints_breached = True
-    n_agv = 20
+    n_agv = 6
     while constraints_breached:
         n_agv += 1
         params.n_agvs = n_agv

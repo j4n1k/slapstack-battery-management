@@ -29,11 +29,12 @@ from experiment_commons import (ExperimentLogger, LoopControl,
 from slapstack import SlapEnv
 from slapstack.interface_templates import SimulationParameters
 from slapstack_controls.output_converters import FeatureConverterCharging
-from slapstack_controls.storage_policies import ClosestOpenLocation, ConstantTimeGreedyPolicy, BatchFIFO
+from slapstack_controls.storage_policies import ClosestOpenLocation, ConstantTimeGreedyPolicy, BatchFIFO, \
+    ClosestToDestination
 from slapstack_controls.charging_policies import (FixedChargePolicy,
                                                   RandomChargePolicy,
                                                   FullChargePolicy,
-                                                  ChargingPolicy)
+                                                  ChargingPolicy, LowTHChargePolicy)
 
 def get_env(sim_parameters: SimulationParameters,
             log_frequency: int,
@@ -55,12 +56,13 @@ def get_env(sim_parameters: SimulationParameters,
             decision_mode = "charging_check"
         else:
             action_converters = [BatchFIFO(),
-                                 ClosestOpenLocation(very_greedy=False)
+                                 ClosestOpenLocation(very_greedy=False),
+                                 LowTHChargePolicy(20)
                                  ]
             feature_list = ["n_depleted_agvs", "avg_battery", "utilization",
-                 "queue_len_charging_station", "global_fill_level",
-                 "queue_len_retrieval_orders", "queue_len_delivery_orders"]
-            decision_mode = cfg.task.task.name
+                 "queue_len_charging_station", "global_fill_level", "curr_agv_battery",
+                 "dist_to_cs", "queue_len_retrieval_orders", "queue_len_delivery_orders"]
+            decision_mode = "charging_check"
         return SlapEnv(
             sim_parameters, seeds, partitions,
             logger=ExperimentLogger(
@@ -71,7 +73,7 @@ def get_env(sim_parameters: SimulationParameters,
             state_converter=FeatureConverterCharging(
                 feature_list,
                 reward_setting=reward_setting, decision_mode=decision_mode),
-            action_converters=action_converters
+             action_converters=action_converters
         )
     else:
         return SlapEnv(
@@ -82,7 +84,8 @@ def get_env(sim_parameters: SimulationParameters,
                 nr_zones=nr_zones,
                 logfile_name=logfile_name),
             action_converters=[BatchFIFO(),
-                               ClosestOpenLocation(very_greedy=False)])
+                               ClosestOpenLocation(very_greedy=False),
+                               LowTHChargePolicy(20)])
 
 
 def _init_run_loop(simulation_parameters, name, log_dir, cfg, state_converter=True):
@@ -195,7 +198,7 @@ def run_evaluation_tensorboard(cfg, model, storage_strategy, state_converter=Tru
             use_case=cfg.sim_params.use_case,
             use_case_n_partitions=cfg.sim_params.use_case_n_partitions,
             use_case_partition_to_use=pt_idx,
-            partition_by_week=cfg.sim_params.partition_by_week,
+            partition_by_day=cfg.sim_params.partition_by_week,
             n_agvs=cfg.sim_params.n_agvs,
             generate_orders=cfg.sim_params.generate_orders,
             verbose=cfg.sim_params.verbose,
@@ -208,7 +211,8 @@ def run_evaluation_tensorboard(cfg, model, storage_strategy, state_converter=Tru
             compute_feature_trackers=cfg.sim_params.compute_feature_trackers,
             n_levels=cfg.sim_params.n_levels,
             charging_thresholds=list(cfg.task.task.charging_thresholds),
-            charge_during_breaks=cfg.sim_params.charge_during_breaks
+            charge_during_breaks=cfg.sim_params.charge_during_breaks,
+            battery_capacity=52
         )
 
         parametrization_failure, episode_results = run_episode(
@@ -325,7 +329,7 @@ def main(cfg: DictConfig):
         log_dir=cfg.experiment.log_dir,
         logfile_name=f"{cfg.model.agent.name}_{cfg.experiment.id}",
         reward_setting=cfg.task.task.reward_setting,
-        partitions=list(cfg.experiment.t_pt),
+        partitions=cfg.experiment.t_pt,
         cfg=cfg
     )
 
