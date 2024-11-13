@@ -13,3 +13,4 @@ sim_params:
   unit_distance: ???
   pallet_shift_penalty_factor: ???
   compute_feature_trackers: true
+  battery_capacity: 52

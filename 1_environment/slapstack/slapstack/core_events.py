@@ -668,6 +668,7 @@ class RetrievalSecondLeg(Travel):
         self.order.set_completion_time(state.time)
         state.trackers.update_on_order_completion(
             self.order, self.distance_penalty)
+        state.agv_manager.agv_index[self.agv_id].orders_since_last_charge += 1
         self.orders.pop(0)
 
         if len(self.orders) > 0:
@@ -703,6 +704,7 @@ class RetrievalSecondLeg(Travel):
                 state.trackers.update_on_order_completion(delivery_order)
                 state.remove_order(delivery_order.order_number)
                 core.logger.log_state()
+                state.agv_manager.agv_index[self.agv_id].orders_since_last_charge += 1
 
     def update_current_event_next_order(self, state: State):
         self.order = self.orders[0]
@@ -831,6 +833,7 @@ class DeliverySecondLeg(Travel):
                 self.order.order_number))
         self.order.set_completion_time(state.time)
         state.trackers.update_on_order_completion(self.order)
+        state.agv_manager.agv_index[self.agv_id].orders_since_last_charge += 1
         if len(self.orders) > 0:
             self.order = self.orders[0]
             self.source = self.order.source
@@ -937,6 +940,7 @@ class DeliverySecondLeg(Travel):
             print(f"finished retrieval order #{self.retrieval_order.order_number}")
         self.retrieval_order.set_completion_time(state.time)
         state.trackers.update_on_order_completion(self.retrieval_order)
+        state.agv_manager.agv_index[self.agv_id].orders_since_last_charge += 1
         core.logger.log_state()
 
 
@@ -968,6 +972,7 @@ class ChargingFirstLeg(Travel):
         else:
             self.agv = state.agv_manager.agv_index[agv_id]
         self.agv.charging_needed = True
+        assert self.agv.battery > 10
         assert self.agv.free == False
         assert self.agv.id == agv_id
 
@@ -994,41 +999,81 @@ class ChargingFirstLeg(Travel):
 class Charging(Event):
     def __init__(self, time: int, charging_event_travel: ChargingFirstLeg,
                  charging_duration: int):
-        super().__init__(time=time, verbose=False)
+        self.start_time = time
+        end_time = time + charging_duration
+        super().__init__(time=end_time, verbose=False)
         self.agv_id = charging_event_travel.agv_id
         self.cs_pos = charging_event_travel.last_node
         self.charging_duration = charging_duration
+        self.intercepted = False
         # TODO ensure AMRs don't overlap at charging station
 
-    def handle(self, state: 'State', core=None):
-        super().handle(state)
-        agv = state.agv_manager.agv_index[self.agv_id]
-        agv.n_charging_stops += 1
-        # assert agv.charging_needed
-        # TODO check KPI evt. Fallunterschiedung KPI charging nicht travel release
+    def check_battery_charge(self, state: 'State'):
+        agvm = state.agv_manager
+        agv = agvm.agv_index[self.agv_id]
+        elapsed_time = state.time - self.start_time
+        battery_increase = elapsed_time * agvm.charging_rate
+        return agv.battery + battery_increase
 
-        state.agv_manager.release_agv(
-            self.cs_pos, self.time, self.agv_id)
-        state.agv_manager.charge_battery(self.charging_duration,
-                                         agv_id=self.agv_id)
-        state.agv_manager.release_charging_station(self.cs_pos,
-                                                   state.agv_manager.agv_index[
-                                                       self.agv_id])
+    def forced_handle(self, state: 'State', target_battery: int):
+        agvm = state.agv_manager
+        agv = agvm.agv_index[self.agv_id]
+        agv.n_charging_stops += 1
+        agvm.release_agv(
+            self.cs_pos, state.time, self.agv_id)
+        assert agv.battery < target_battery
+        agv.battery = target_battery
+        agv.charging_needed = False
+        agvm.n_charging_agvs -= 1
+        agvm.release_charging_station(self.cs_pos, agvm.agv_index[self.agv_id])
         travel = Relocation(state, self.cs_pos, self.agv_id)
         charging_event = None
-        if state.agv_manager.queued_charging_events[self.cs_pos]:
-            charging_event = state.agv_manager.queued_charging_events[
-                self.cs_pos].pop()
+        if agvm.queued_charging_events[self.cs_pos]:
+            charging_event = agvm.queued_charging_events[self.cs_pos].pop()
         else:
-            for cs in state.agv_manager.queued_charging_events.keys():
-                if state.agv_manager.queued_charging_events[cs]:
-                    charging_event = state.agv_manager.queued_charging_events[
-                        cs].pop()
+            for cs in agvm.queued_charging_events.keys():
+                if agvm.queued_charging_events[cs]:
+                    charging_event = agvm.queued_charging_events[cs].pop()
                     break
-        state.agv_manager.update_trackers_on_charging_end()
+        agvm.update_trackers_on_charging_end()
+        return travel, charging_event
+
+    def handle(self, state: 'State', core=None):
+        # 2024813, 39, 217
+        if not self.intercepted:
+            super().handle(state)
+            agv = state.agv_manager.agv_index[self.agv_id]
+            target_battery = (self.charging_duration * state.agv_manager.charging_rate) + agv.battery
+            travel, charging_event = self.forced_handle(state, target_battery)
+            return EventHandleInfo(False, travel, travel, None,
+                                   None, charging_event)
+        else:
+            return EventHandleInfo(False, None, None, None, None)
+        # agv = state.agv_manager.agv_index[self.agv_id]
+        # agv.n_charging_stops += 1
+        # # assert agv.charging_needed
+        # # TODO check KPI evt. Fallunterschiedung KPI charging nicht travel release
+        #
+        # state.agv_manager.release_agv(
+        #     self.cs_pos, self.time, self.agv_id)
+        # # state.agv_manager.charge_battery(self.charging_duration,
+        # #                                  agv_id=self.agv_id)
+        # state.agv_manager.release_charging_station(self.cs_pos,
+        #                                            state.agv_manager.agv_index[
+        #                                                self.agv_id])
+        # travel = Relocation(state, self.cs_pos, self.agv_id)
+        # charging_event = None
+        # if state.agv_manager.queued_charging_events[self.cs_pos]:
+        #     charging_event = state.agv_manager.queued_charging_events[
+        #         self.cs_pos].pop()
+        # else:
+        #     for cs in state.agv_manager.queued_charging_events.keys():
+        #         if state.agv_manager.queued_charging_events[cs]:
+        #             charging_event = state.agv_manager.queued_charging_events[
+        #                 cs].pop()
+        #             break
+        # state.agv_manager.update_trackers_on_charging_end()
         #assert charging_event
-        return EventHandleInfo(False, travel, travel, None,
-                               None, charging_event)
 
 
 class GoChargingCheck(Event):

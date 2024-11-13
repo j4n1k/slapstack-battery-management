@@ -78,7 +78,7 @@ class SimulationParameters:
                  verbose: bool = False,
                  agv_speed: float = 2.0,
                  unit_distance: float = 1.4,
-                 pallet_shift_penalty_factor: int = 10,
+                 pallet_shift_penalty_factor: int = 10, # TODO evtl. erhöhen
                  n_rows: int = None,
                  n_columns: int = None,
                  n_levels: int = None,
@@ -103,7 +103,8 @@ class SimulationParameters:
                  charging_thresholds: Union[list[int], Tuple[float, float]] = None,
                  partition_by_week: bool = False,
                  partition_by_day: bool = False,
-                 charge_during_breaks: bool = False
+                 charge_during_breaks: bool = False,
+                 interrupt_charging_mode: bool = False
                  ):
 
         # The inpt that are not required when usecase is provided.
@@ -120,6 +121,7 @@ class SimulationParameters:
                               / self.battery_capacity) * 100
         self.charging_thresholds = charging_thresholds
         self.charge_during_breaks = charge_during_breaks
+        self.interrupt_charging_mode = interrupt_charging_mode
         self.material_handling_time = material_handling_time
         optionals = [
             n_rows, n_columns, n_levels, n_skus, all_skus, n_orders, order_list,
@@ -433,22 +435,25 @@ class SimulationParameters:
         return skus
 
     def load_initial_skus(self, use_case_idx: int):
-        if use_case_idx != None:
-            root_dir = sep.join([sep.join(
-                abspath(__file__).split(sep)[:-1]), "use_cases",
-                self.use_case_name])
-            partition_order_path = f"partitions/{use_case_idx}_partition_fill_lvl.json"
-            with open(join(root_dir, partition_order_path)) as json_file:
-                initial_fill_json = json.load(json_file)
-        else:
-            with open(self.initial_sku_path) as json_file:
-                initial_fill_json = json.load(json_file)
-        skus_ini = defaultdict(int)
-        all_skus = set(skus_ini.keys())
-        for sku, amount in initial_fill_json.items():
-            skus_ini[int(sku)] = amount
-            all_skus.add(int(sku))
-        return skus_ini, all_skus
+        try:
+            if use_case_idx != None:
+                root_dir = sep.join([sep.join(
+                    abspath(__file__).split(sep)[:-1]), "use_cases",
+                    self.use_case_name])
+                partition_order_path = f"partitions/{use_case_idx}_partition_fill_lvl.json"
+                with open(join(root_dir, partition_order_path)) as json_file:
+                    initial_fill_json = json.load(json_file)
+            else:
+                with open(self.initial_sku_path) as json_file:
+                    initial_fill_json = json.load(json_file)
+            skus_ini = defaultdict(int)
+            all_skus = set(skus_ini.keys())
+            for sku, amount in initial_fill_json.items():
+                skus_ini[int(sku)] = amount
+                all_skus.add(int(sku))
+            return skus_ini, all_skus
+        except FileNotFoundError:
+            return None, None
 
     def load_orders(self, use_case_idx: int):
         if use_case_idx != None:
@@ -517,8 +522,8 @@ class UseCasePartition:
                              current_week + 1: initial_skus.copy()}
         self.sku_in_counts = {current_week: defaultdict(int)}
         self.sku_out_counts = {current_week: defaultdict(int)}
-        if UseCasePartition.layout is None:
-            UseCasePartition.layout = UseCasePartition.get_layout(layout_path)
+        # if UseCasePartition.layout is None:
+        UseCasePartition.layout = UseCasePartition.get_layout(layout_path)
         self.n_levels = n_levels
         self.first_order = first_order
         self.last_order = first_order

@@ -57,6 +57,8 @@ class WandbCallback(BaseCallback):
             "train/n_retrieval_orders": training_env.core_env.state.trackers.n_queued_retrieval_orders,
             "train/n_delivery_orders": training_env.core_env.state.trackers.n_queued_delivery_orders,
             "train/n_depleted_amr": training_env.core_env.state.agv_manager.get_n_depleted_agvs(),
+            "train/utilization": training_env.core_env.state.agv_manager.get_average_utilization() /
+                                 training_env.core_env.state.time if training_env.core_env.state.time != 0 else 0,
             "train/queued_charging_events": np.average(list(queue_per_station.values())),
             "train/last_reward": training_env.last_reward,
         })

@@ -16,7 +16,7 @@ from sb3_contrib.common.wrappers import ActionMasker
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
 from stable_baselines3 import DQN, SAC
 from sb3_contrib import MaskablePPO
-from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
+from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecNormalize, VecMonitor
 from torch.utils.tensorboard import SummaryWriter
 import wandb
 # from wandb.integration.sb3 import WandbCallback
@@ -50,9 +50,7 @@ def get_env(sim_parameters: SimulationParameters,
                                  ClosestOpenLocation(very_greedy=False),
                                  FixedChargePolicy(100)
                                  ]
-            feature_list = ["n_depleted_agvs", "avg_battery", "utilization",
-                 "queue_len_charging_station", "global_fill_level", "curr_agv_battery",
-                 "dist_to_cs", "queue_len_retrieval_orders", "queue_len_delivery_orders"]
+            feature_list = cfg.experiment.feature_list
             decision_mode = "charging_check"
         else:
             action_converters = [BatchFIFO(),
@@ -61,7 +59,8 @@ def get_env(sim_parameters: SimulationParameters,
                                  ]
             feature_list = ["n_depleted_agvs", "avg_battery", "utilization",
                  "queue_len_charging_station", "global_fill_level", "curr_agv_battery",
-                 "dist_to_cs", "queue_len_retrieval_orders", "queue_len_delivery_orders"]
+                 "dist_to_cs", "queue_len_retrieval_orders", "queue_len_delivery_orders",
+                 "hour_sin", "hour_cos", "day_of_week"]
             decision_mode = "charging_check"
         return SlapEnv(
             sim_parameters, seeds, partitions,
@@ -198,7 +197,8 @@ def run_evaluation_tensorboard(cfg, model, storage_strategy, state_converter=Tru
             use_case=cfg.sim_params.use_case,
             use_case_n_partitions=cfg.sim_params.use_case_n_partitions,
             use_case_partition_to_use=pt_idx,
-            partition_by_day=cfg.sim_params.partition_by_week,
+            partition_by_week=cfg.sim_params.partition_by_week,
+            partition_by_day=cfg.sim_params.partition_by_day,
             n_agvs=cfg.sim_params.n_agvs,
             generate_orders=cfg.sim_params.generate_orders,
             verbose=cfg.sim_params.verbose,
@@ -212,7 +212,7 @@ def run_evaluation_tensorboard(cfg, model, storage_strategy, state_converter=Tru
             n_levels=cfg.sim_params.n_levels,
             charging_thresholds=list(cfg.task.task.charging_thresholds),
             charge_during_breaks=cfg.sim_params.charge_during_breaks,
-            battery_capacity=52
+            battery_capacity=cfg.sim_params.battery_capacity
         )
 
         parametrization_failure, episode_results = run_episode(
@@ -245,9 +245,20 @@ def mask_fn(env: SlapEnv):
     return env.valid_action_mask()
 
 
+# def mask_fn(env):
+#     """Get action mask for environment"""
+#     if hasattr(env, 'valid_action_mask'):
+#         return env.valid_action_mask()
+#     if hasattr(env, 'env'):
+#         return mask_fn(env.env)
+#     if hasattr(env, 'envs'):
+#         # For vectorized environments, return mask for first env
+#         return mask_fn(env.envs[0])
+#     raise ValueError("Environment doesn't have valid_action_mask method")
+
 def make_env(sim_params, log_frequency, nr_zones, logfile_name, log_dir, partitions, reward_setting, cfg):
     def _init():
-        return get_env(
+        env = get_env(
             sim_parameters=sim_params,
             log_frequency=log_frequency,
             nr_zones=nr_zones,
@@ -257,6 +268,8 @@ def make_env(sim_params, log_frequency, nr_zones, logfile_name, log_dir, partiti
             reward_setting=reward_setting,
             cfg=cfg
         )
+        env = ActionMasker(env, mask_fn)
+        return env
     return _init
 
 
@@ -306,6 +319,7 @@ def main(cfg: DictConfig):
         use_case_n_partitions=cfg.sim_params.use_case_n_partitions,
         use_case_partition_to_use=cfg.sim_params.use_case_partition_to_use,
         partition_by_week=cfg.sim_params.partition_by_week,
+        partition_by_day=cfg.sim_params.partition_by_day,
         n_agvs=cfg.sim_params.n_agvs,
         generate_orders=cfg.sim_params.generate_orders,
         verbose=cfg.sim_params.verbose,
@@ -318,7 +332,8 @@ def main(cfg: DictConfig):
         compute_feature_trackers=cfg.sim_params.compute_feature_trackers,
         n_levels=cfg.sim_params.n_levels,
         charging_thresholds=th,
-        charge_during_breaks=cfg.sim_params.charge_during_breaks
+        charge_during_breaks=cfg.sim_params.charge_during_breaks,
+        battery_capacity=cfg.sim_params.battery_capacity
     )
 
     # Create environment
@@ -333,6 +348,28 @@ def main(cfg: DictConfig):
         cfg=cfg
     )
 
+    # env = DummyVecEnv([
+    #         make_env(
+    #             sim_params=sim_params,
+    #             log_frequency=1000,
+    #             nr_zones=3,
+    #             log_dir=cfg.experiment.log_dir,
+    #             logfile_name=f"{cfg.model.agent.name}_{cfg.experiment.id}",
+    #             reward_setting=cfg.task.task.reward_setting,
+    #             partitions=cfg.experiment.t_pt,
+    #             cfg=cfg
+    #         )
+    #     ])
+    # env = VecNormalize(
+    #     env,
+    #     norm_obs=False,  # Normalize observations
+    #     norm_reward=False,  # Normalize rewards
+    #     clip_reward=10.0,  # Clip normalized rewards
+    #     gamma=0.99,  # Discount factor
+    #     training=True  # Update reward normalization statistics during training
+    # )
+    # env = VecMonitor(env)
+
     eval_env: SlapEnv = get_env(
         sim_parameters=sim_params,
         log_frequency=1000,
@@ -340,9 +377,30 @@ def main(cfg: DictConfig):
         log_dir=cfg.experiment.log_dir,
         logfile_name=f"{cfg.model.agent.name}_{cfg.experiment.id}",
         reward_setting=1,
-        partitions=[cfg.experiment.e_pt],
+        partitions=cfg.experiment.e_pt,
         cfg=cfg
     )
+    # eval_env = DummyVecEnv([
+    #     make_env(
+    #         sim_params=sim_params,
+    #         log_frequency=1000,
+    #         nr_zones=3,
+    #         log_dir=cfg.experiment.log_dir,
+    #         logfile_name=f"{cfg.model.agent.name}_{cfg.experiment.id}",
+    #         reward_setting=1,
+    #         partitions=[cfg.experiment.e_pt],
+    #         cfg=cfg
+    #     )
+    # ])
+    # eval_env = VecNormalize(
+    #     eval_env,
+    #     norm_obs=False,  # Normalize observations
+    #     norm_reward=False,  # Normalize rewards
+    #     clip_reward=10.0,  # Clip normalized rewards
+    #     gamma=0.99,  # Discount factor
+    #     training=False  # Update reward normalization statistics during training
+    # )
+    # eval_env = VecMonitor(eval_env)
 
     # Create agent
     if cfg.model.agent.name == "PPO":
@@ -351,7 +409,7 @@ def main(cfg: DictConfig):
         model = MaskablePPO(MaskableActorCriticPolicy, env,
                             verbose=1,
                             tensorboard_log="./dqn_charging_tensorboard/",
-                            ent_coef=cfg.model.agent.model_params.ent_coef,
+                            # ent_coef=cfg.model.agent.model_params.ent_coef,
                             device="cpu")
     elif cfg.model.agent.name == "Threshold":
         model = FixedChargePolicy(charging_threshold=cfg.model.agent.model_params.threshold)

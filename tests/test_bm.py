@@ -1,6 +1,9 @@
 import json
+import os
 import time
 from collections import defaultdict
+
+import pandas as pd
 from math import floor
 from os.path import join
 from unittest import TestCase
@@ -9,10 +12,10 @@ from gymnasium.vector import AsyncVectorEnv
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
 from sb3_contrib.common.wrappers import ActionMasker
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor, VecNormalize
 
 from experiments.experiment_commons import run_episode, get_episode_env, get_partitions_path, delete_partitions_data, \
-    ExperimentLogger, LoopControl
+    ExperimentLogger, LoopControl, get_layout_path
 from slapstack import SlapCore, SlapEnv
 import random
 import numpy as np
@@ -21,9 +24,11 @@ from slapstack.core_state import State
 from slapstack.helpers import print_3d_np
 from slapstack.interface_input import Input
 from slapstack.interface_templates import SimulationParameters
-from slapstack_controls.charging_policies import FixedChargePolicy, LowTHChargePolicy, CombinedChargingPolicy
+from slapstack_controls.charging_policies import FixedChargePolicy, LowTHChargePolicy, CombinedChargingPolicy, \
+    OpportunityChargePolicy
 from slapstack_controls.output_converters import FeatureConverterCharging
 from slapstack_controls.storage_policies import ConstantTimeGreedyPolicy, ClosestOpenLocation, BatchFIFO
+from tests.experiment_commons import count_charging_stations, delete_prec_dima, gen_charging_stations
 
 
 class TestSlapEnv(TestCase):
@@ -95,6 +100,36 @@ class TestSlapEnv(TestCase):
             return parametrization_failure
         else:
             return loop_controls.state
+
+    def test_minislap(self):
+        params = SimulationParameters(
+            use_case="minislap",
+            use_case_n_partitions=1,
+            use_case_partition_to_use=0,
+            n_agvs=3,
+            generate_orders=False,
+            verbose=False,
+            resetting=False,
+            initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+            pure_lanes=True,
+            n_levels=3,
+            # https://logisticsinside.eu/speed-of-warehouse-trucks/
+            agv_speed=2,
+            unit_distance=1.4,
+            pallet_shift_penalty_factor=20,  # in seconds
+            compute_feature_trackers=True,
+            charging_thresholds=[40, 50, 60, 70, 80],
+            battery_capacity=10
+        )
+
+        final_state: State = run_episode(simulation_parameters=params,
+                    storage_strategy=ClosestOpenLocation(very_greedy=False),
+                    charging_strategy=FixedChargePolicy(100),
+                    print_freq=100000, warm_start=False,
+                    log_dir='./logs/tests/no_bc_single_pt/',
+                    charging_check_strategy=LowTHChargePolicy(20),
+                    testing=True)
+
     def test_env_no_battery_constraints_single_pt(self):
         params = SimulationParameters(
             use_case="wepastacks_bm",
@@ -153,6 +188,56 @@ class TestSlapEnv(TestCase):
     #                 print_freq=100000, warm_start=False,
     #                 log_dir='./logs/tests/no_bc_single_pt/',
     #                 charging_check_strategy=LowTHChargePolicy(20), testing=True)
+
+    def test_cs_required(self):
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        use_case_base = "wepastacks"
+        use_case = "wepastacks_bm"
+        layout_path_base = get_layout_path(use_case_base)
+        layout_path_present = get_layout_path(use_case)
+
+        # When saving/loading the model:
+        n_cs = 0
+        constraints_breached = True
+        while constraints_breached:
+            n_cs += 1
+            layout_present = pd.read_csv(layout_path_present, header=None, delimiter=",")
+            n_cs_present = count_charging_stations(layout_present)
+            if n_cs_present != n_cs:
+                delete_prec_dima(BASE_DIR, use_case)
+                layout_base = pd.read_csv(layout_path_base, header=None, delimiter=",")
+                layout_new = pd.DataFrame()
+                layout_new = gen_charging_stations(layout_base, n_cs)
+                layout_new.to_csv(layout_path_present,
+                                  header=None, index=False)
+            params = SimulationParameters(
+                    use_case="wepastacks_bm",
+                    use_case_n_partitions=1,
+                    use_case_partition_to_use=0,
+                    n_agvs=40,
+                    generate_orders=False,
+                    verbose=False,
+                    resetting=False,
+                    initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+                    pure_lanes=True,
+                    n_levels=3,
+                    # https://logisticsinside.eu/speed-of-warehouse-trucks/
+                    agv_speed=2,
+                    unit_distance=1.4,
+                    pallet_shift_penalty_factor=20,  # in seconds
+                    compute_feature_trackers=True,
+                    charging_thresholds=[40, 50, 60, 70, 80],
+                    battery_capacity=80,
+                    charge_during_breaks=True
+                )
+
+            constraints_breached = run_episode(simulation_parameters=params,
+                            storage_strategy=ClosestOpenLocation(very_greedy=False),
+                            charging_strategy=FixedChargePolicy(80),
+                            print_freq=1000, warm_start=False,
+                            log_dir='./logs/tests/no_bc_single_pt/',
+                            charging_check_strategy=LowTHChargePolicy(20), testing=False,
+                            stop_condition=True)
 
     # def test_env_battery_constraints_single_pt(self):
     #     params = SimulationParameters(
@@ -220,7 +305,40 @@ class TestSlapEnv(TestCase):
         params = SimulationParameters(
             use_case="wepastacks_bm",
             use_case_n_partitions=20,
-            use_case_partition_to_use=0,
+            use_case_partition_to_use=4,
+            partition_by_week=True,
+            n_agvs=40,
+            generate_orders=False,
+            verbose=False,
+            resetting=False,
+            initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+            pure_lanes=True,
+            n_levels=3,
+            # https://logisticsinside.eu/speed-of-warehouse-trucks/
+            agv_speed=2,
+            unit_distance=1.4,
+            pallet_shift_penalty_factor=20,  # in seconds
+            compute_feature_trackers=True,
+            charging_thresholds=[40, 50, 60, 70, 80],
+            battery_capacity=80
+        )
+
+        final_state: State = run_episode(simulation_parameters=params,
+                                         storage_strategy=ClosestOpenLocation(very_greedy=False),
+                                         charging_strategy=FixedChargePolicy(100),
+                                         print_freq=100000, warm_start=False,
+                                         log_dir='./logs/tests/no_bc_single_pt/',
+                                         charging_check_strategy=OpportunityChargePolicy(),
+                                         testing=True)
+
+
+    def test_opportunity_charging(self):
+        # Charging Action from ChargingPolicy gets overwritten by CombinedChargingPolicy
+        params = SimulationParameters(
+            use_case="wepastacks_bm",
+            use_case_n_partitions=20,
+            use_case_partition_to_use=4,
+            partition_by_week=True,
             n_agvs=40,
             generate_orders=False,
             verbose=False,
@@ -238,17 +356,16 @@ class TestSlapEnv(TestCase):
         )
 
         final_state: State = self.run_episode(simulation_parameters=params,
-                                         print_freq=100000,
+                                         print_freq=1000,
                                          log_dir='./logs/tests/partitioning/go_charging',
-                                         charging_check_strategy=CombinedChargingPolicy(20, 70),
+                                         charging_check_strategy=OpportunityChargePolicy(),
                                          testing=True,
                                          action_converters=[BatchFIFO(),
                                                             ClosestOpenLocation(very_greedy=False),
-                                                            FixedChargePolicy(70)],
+                                                            FixedChargePolicy(100)],
                                          steps_per_episode=None)
 
         assert final_state.trackers.average_service_time == 463.81978959254207
-
 
     def test_charge_during_breaks(self):
         # Charging Action from ChargingPolicy gets overwritten by CombinedChargingPolicy
@@ -571,6 +688,13 @@ class TestSlapEnv(TestCase):
             ) for pt in [0, 2]
         ])
         vec_env = VecMonitor(vec_env)
+        vec_env = VecNormalize(
+                    vec_env,
+                    norm_obs=True,
+                    norm_reward=True,
+                    clip_reward=10.0,
+                    gamma=0.99,
+                )
         # Initialize PPO with the vectorized environment
         model = MaskablePPO(
             MaskableActorCriticPolicy,

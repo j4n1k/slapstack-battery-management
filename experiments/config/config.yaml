@@ -6,15 +6,27 @@ defaults:
 
 experiment:
   name: "agv_charging_rl"
-  setting: "eval"
+  setting: "train"
   log_dir: "./logs"
-  total_timesteps: 2000000
-  eval_freq: 60000
-  n_eval_episodes: 1
-  t_pt:
-  e_pt:
-  n_cs: 20
-  id: wepa-days #7cs-20agv-1pt-cross-4reward
+  total_timesteps: 8000000
+  eval_freq: 100000
+  n_eval_episodes: 2
+  t_pt: [1, 2]
+  e_pt: [1, 2]
+  n_cs: 2
+  feature_list: ["n_depleted_agvs", "free_agv", "avg_battery", "utilization",
+                "queue_len_charging_station", "global_fill_level",
+                "curr_agv_battery", "dist_to_cs",
+                "queue_len_retrieval_orders", "queue_len_delivery_orders",
+                "hour_sin", "hour_cos", "day_of_week"]
+  # entropy
+
+  id: "${now:%Y%m%d_%H%M%S}_20cs-40agv-14pt-wepa" # 20cs-40agv-14pt-wepa #7cs-20agv-1pt-cross-4reward
 
 evaluation:
-  eval_partitions: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88]
+  eval_partitions: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+
+#"n_depleted_agvs", "avg_battery", "utilization",
+#"queue_len_charging_station", "global_fill_level", "curr_agv_battery",
+#"dist_to_cs", "queue_len_retrieval_orders", "queue_len_delivery_orders",
+#"hour_sin", "hour_cos", "day_of_week"

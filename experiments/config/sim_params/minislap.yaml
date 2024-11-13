@@ -3,9 +3,9 @@ defaults:
   - base_sim_params
 
 sim_params:
-  use_case: wepastacks_bm
-  use_case_n_partitions: 20
-  n_agvs: 40
+  use_case: "minislap"
+  use_case_n_partitions: 1
+  n_agvs: 3
   initial_pallets_storage_strategy: "ConstantTimeGreedyPolicy"
   pure_lanes: true
   n_levels: 3
@@ -13,5 +13,5 @@ sim_params:
   unit_distance: 1.4
   pallet_shift_penalty_factor: 20
   charge_during_breaks: false
-  partition_by_week: true
+  partition_by_week: false
   partition_by_day: false

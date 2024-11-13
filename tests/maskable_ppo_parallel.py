@@ -61,7 +61,8 @@ def get_rl_env(sim_parameters: SimulationParameters,
     feature_list = ["n_depleted_agvs", "avg_battery", "utilization",
                     "queue_len_charging_station", "global_fill_level",
                     "curr_agv_battery", "dist_to_cs",
-                    "queue_len_retrieval_orders", "queue_len_delivery_orders"]
+                    "queue_len_retrieval_orders", "queue_len_delivery_orders",
+                    "hour_sin", "hour_cos", "day_of_week"]
 
     decision_mode = "charging_check"
 

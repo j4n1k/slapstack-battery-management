@@ -1,4 +1,5 @@
 import time
+from copy import deepcopy
 from typing import Tuple, List, Any, Union
 
 import gymnasium as gym
@@ -91,6 +92,7 @@ class SlapCore(gym.Env):
             first value in state_stack
         logger: Logger
         """
+        self.interrupt_charging_mode = usr_inpt.params.interrupt_charging_mode
         self.charge_during_breaks = usr_inpt.params.charge_during_breaks
         self.inpt = usr_inpt
         self.rng = None
@@ -296,6 +298,7 @@ class SlapCore(gym.Env):
         while (not action_needed
                and (e.running or retrieval_ok or delivery_ok)):
             self.print("~" * 150 + "\n" + "step no action \n" + "~" * 150)
+            self.set_next_main_event_time()
             if self.charge_during_breaks:
                 charge_time_check = self.time_check_charging()
                 if charge_time_check:
@@ -313,9 +316,20 @@ class SlapCore(gym.Env):
 
             next_event = None
             # if there are serviceable queued events, take care of them first.
-            if (retrieval_ok or delivery_ok) and\
+            if (retrieval_ok or delivery_ok) and \
                     s.agv_manager.agv_available(order_type=None, only_new=True):
                 next_event = e.pop_queued_event(s)
+            # while retrieval_ok or delivery_ok:
+            #     if s.agv_manager.agv_available(order_type=None, only_new=True):
+            #         next_event = e.pop_queued_event(s)
+            #         break
+            #     else:
+            #         interrupted = self.interrupt_charging()
+            #         if interrupted:
+            #             continue
+            #         else:
+            #             break
+
             if next_event is None:
                 if not e.running:
                     return True
@@ -331,11 +345,33 @@ class SlapCore(gym.Env):
                        " order: " + str(self.legal_actions))
         return False
 
-    def time_check_charging(self):
+    def interrupt_charging(self):
+        s = self.state
+        agvm = s.agv_manager
+        for cq_pos in agvm.queued_charging_events.keys():
+            charging_event_list = agvm.queued_charging_events[cq_pos]
+            if charging_event_list:
+                charging_event = charging_event_list[0]
+                target_battery = charging_event.check_battery_charge(s)
+#                assert target_battery < 100
+                if target_battery >= 40:
+                    travel = charging_event.forced_handle(s, target_battery)
+                    charging_event.intercepted = True
+                    self.events.add_travel_event(travel)
+                    return True
+        return False
+
+    def set_next_main_event_time(self):
         s, e = self.state, self.events
-        next_event_peek = e.running[0]
-        state_time = s.time
+        try:
+            next_event_peek = e.running[0]
+        except:
+            print()
         s.set_main_event_time(next_event_peek)
+
+    def time_check_charging(self):
+        s = self.state
+        state_time = s.time
         next_event_peek_time = s.next_main_event_time
         time_delta = next_event_peek_time - state_time
         # if time_delta > self.rs_manager.highest_time_delta:
@@ -554,8 +590,8 @@ class SlapCore(gym.Env):
             action = prev_e.fixed_charging_duration
         # TODO Revisit EventType und Events
         # delivery_order: Union[Delivery, None] = None
-        time_done = self.state.time + action
-        charging_event = Charging(time_done, charging_event_travel=prev_e,
+
+        charging_event = Charging(self.state.time, charging_event_travel=prev_e,
                                   charging_duration=action)
         booked_cs = self.state.agv_manager.booked_charging_stations
         queue = self.state.agv_manager.queued_charging_events[prev_e.last_node]

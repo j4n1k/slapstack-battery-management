@@ -11,14 +11,14 @@ env:
   n_partitions: 20
   n_agvs: 40
   seed: null  # Set to integer for reproducibility
-  train_partitions: [33, 34]  # Partitions to use in parallel
-  eval_partitions: [43, 44]
+  train_partitions: [37, 38, 39, 40, 41, 42, 44]  # Partitions to use in parallel
+  eval_partitions: [37, 38, 39, 40, 41, 42, 44]
   charging_thresholds: [0, 30, 40, 50, 60, 70, 80]
   battery_capacity: 52
 
 training:
   device: "cpu"
-  total_timesteps: 2000000
+  total_timesteps: 20000000
   learning_rate: 3e-4
   n_steps: 2048
   batch_size: 64
@@ -30,7 +30,7 @@ training:
 
 evaluation:
   eval_freq: 40000
-  n_eval_episodes: 3  # Number of evaluation episodes
+  n_eval_episodes: 7  # Number of evaluation episodes
   deterministic: true
 
 logging:

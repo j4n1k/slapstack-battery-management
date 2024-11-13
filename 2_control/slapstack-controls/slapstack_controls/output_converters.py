@@ -296,6 +296,7 @@ class FeatureConverter(OutputConverter):
 
 class FeatureConverterCharging(OutputConverter):
     def __init__(self, feature_list, decision_mode="charging", reward_setting=1):
+        self.max_total_queue = 0
         self.util_last_step = 0
         self.decision_mode = decision_mode
         self.rewards = []
@@ -320,6 +321,10 @@ class FeatureConverterCharging(OutputConverter):
         self.running_avg = 0
         self.feature_stack = np.zeros((0, 0))
         self.reward_setting = reward_setting
+        self.max_distance_seen = 0
+        self.history_window = 1000
+        self.service_time_history = []
+        self.trend_window = 6000
 
     def init_fill_level_per_lane(self, state: State):
         lt: LocationTrackers = state.location_manager.location_trackers
@@ -351,10 +356,11 @@ class FeatureConverterCharging(OutputConverter):
         else:
             agvm = state.agv_manager
             agv = agvm.agv_index[agv_id]
-            try:
-                assert agv.battery >= 20
-            except:
-                print(f"Error in Converter: Battery below Threshold: {agv.battery} ")
+            assert agv.battery > 0
+            # try:
+            #     assert agv.battery >= 20
+            # except:
+            #     print(f"Error in Converter: Battery below Threshold: {agv.battery} ")
             if agv.battery == 0:
                 print()
             return agv.battery / 100
@@ -378,11 +384,25 @@ class FeatureConverterCharging(OutputConverter):
         agvm = state.agv_manager
         return agvm.n_charging_agvs / agvm.n_agvs
 
-    @staticmethod
-    def f_get_dist_to_cs(state: State):
+    def f_get_dist_to_cs(self, state: State):
+        # agv_id = state.current_agv
+        # if agv_id == None:
+        #     return 0
+        # agv = state.agv_manager.agv_index[agv_id]
+        # agv_position = agv.position
+        # min_distance = inf
+        # for cs_position in state.agv_manager.charging_stations:
+        #     d = state.agv_manager.router.get_distance(
+        #         agv_position,
+        #         (cs_position[0], cs_position[1])
+        #     )
+        #     if d < min_distance:
+        #         min_distance = d
+        # return min_distance / state.agv_manager.router.max_distance
         agv_id = state.current_agv
-        if agv_id == None:
+        if agv_id is None:
             return 0
+
         agv = state.agv_manager.agv_index[agv_id]
         agv_position = agv.position
         min_distance = inf
@@ -393,7 +413,16 @@ class FeatureConverterCharging(OutputConverter):
             )
             if d < min_distance:
                 min_distance = d
-        return min_distance / state.agv_manager.router.max_distance
+
+        # Update max_distance_seen if we see a larger value
+        if min_distance > self.max_distance_seen:
+            self.max_distance_seen = min_distance
+
+        # Normalize by max distance seen so far
+        if self.max_distance_seen > 0:
+            return min_distance / self.max_distance_seen
+        return 0.0
+
 
     @staticmethod
     def f_get_state_time(state: State):
@@ -434,12 +463,24 @@ class FeatureConverterCharging(OutputConverter):
                 queue_per_station.values())) / self.max_queue_len
 
     def f_get_queue_len_retrieval_orders(self, state: State):
-        return (state.trackers.n_queued_retrieval_orders
-                / 330)
+        n_ret = state.trackers.n_queued_retrieval_orders
+        if n_ret > self.max_retrieval_buffer_len:
+            self.max_retrieval_buffer_len = n_ret
+        if self.max_retrieval_buffer_len == 0:
+            return 0
+        else:
+            return (state.trackers.n_queued_retrieval_orders
+                    / self.max_retrieval_buffer_len)
 
     def f_get_queue_len_delivery_orders(self, state: State):
-        return (state.trackers.n_queued_delivery_orders
-                / 240)
+        n_del = state.trackers.n_queued_delivery_orders
+        if n_del > self.max_delivery_buffer_len:
+            self.max_delivery_buffer_len = n_del
+        if self.max_delivery_buffer_len == 0:
+            return 0
+        else:
+            return (state.trackers.n_queued_delivery_orders
+                    / self.max_delivery_buffer_len)
 
     def f_get_throughput_delivery_orders(self, state: State):
         delivery_orders_now = 0
@@ -470,6 +511,95 @@ class FeatureConverterCharging(OutputConverter):
             return throughput_retrieval
         else:
             return 0
+
+    @staticmethod
+    def f_get_hour_sin(state: State):
+        """Return sine of hour of day for cyclical representation"""
+        seconds_in_day = 24 * 3600
+        time_of_day = state.time % seconds_in_day
+        hour = (time_of_day / 3600)  # 0-24
+        return np.sin(2 * np.pi * hour / 24)
+
+    @staticmethod
+    def f_get_hour_cos(state: State):
+        """Return cosine of hour of day for cyclical representation"""
+        seconds_in_day = 24 * 3600
+        time_of_day = state.time % seconds_in_day
+        hour = (time_of_day / 3600)  # 0-24
+        return np.cos(2 * np.pi * hour / 24)
+
+    @staticmethod
+    def f_get_day_of_week(state: State):
+        """Return normalized day of week (0-1)"""
+        seconds_in_day = 24 * 3600
+        day = (state.time // seconds_in_day) % 7
+        return day / 7  # normalize to 0-1
+
+    @staticmethod
+    def f_get_day_sin(state: State):
+        """Return sine of day of week for cyclical representation"""
+        seconds_in_day = 24 * 3600
+        day = (state.time // seconds_in_day) % 7  # 0-6
+        return np.sin(2 * np.pi * day / 7)
+
+    @staticmethod
+    def f_get_day_cos(state: State):
+        """Return cosine of day of week for cyclical representation"""
+        seconds_in_day = 24 * 3600
+        day = (state.time // seconds_in_day) % 7  # 0-6
+        return np.cos(2 * np.pi * day / 7)
+
+    @staticmethod
+    def f_get_util_since_last_charge(state: State):
+        agv_id = state.current_agv
+        if not agv_id:
+            return 0
+        else:
+            agv = state.agv_manager.agv_index[agv_id]
+            return agv.util_since_last_charge #/ state.time if state.time > 0 else 0
+
+
+    @staticmethod
+    def f_get_orders_since_last_charge(state: State):
+        agv_id = state.current_agv
+        if not agv_id:
+            return 0
+        else:
+            agv = state.agv_manager.agv_index[agv_id]
+            if len(state.trackers.finished_orders) == 0:
+                return 0
+            else:
+                return agv.orders_since_last_charge # / len(state.trackers.finished_orders)
+
+    @staticmethod
+    def f_get_throughput_since_last_charge(state: State):
+        agv_id = state.current_agv
+        if not agv_id:
+            return 0
+        else:
+            agv = state.agv_manager.agv_index[agv_id]
+            if len(state.trackers.finished_orders) == 0:
+                return 0
+            elif agv.util_since_last_charge == 0:
+                return 0
+            else:
+                return agv.orders_since_last_charge / agv.util_since_last_charge
+
+    @staticmethod
+    def f_get_agv_id(state: State):
+        agv_id = state.current_agv
+        if not agv_id:
+            return 0
+        else:
+            return state.current_agv / len(state.agv_manager.agv_index)
+
+    @staticmethod
+    def f_get_orders_not_served(state: State):
+        pass
+
+    @staticmethod
+    def f_get_free_agv(state: State):
+        return state.agv_manager.n_free_agvs / state.agv_manager.n_agvs
 
     def modify_state(self, state: State) -> np.ndarray:
         # if state.decision_mode == "charging":
@@ -503,6 +633,7 @@ class FeatureConverterCharging(OutputConverter):
         self.running_avg = 0
         self.rewards = []
         self.util_last_step = 0
+        # self.service_time_history = []
 
     def calculate_reward(self,
                          state: State,
@@ -582,8 +713,421 @@ class FeatureConverterCharging(OutputConverter):
                     state.rewards = self.rewards
                     # self.n_orders_last_step = n_orders_now
                     return delta_util
+            elif self.reward_setting == 6:
+                agv_id = state.current_agv
+                if not agv_id:
+                    return 0
+                else:
+                    agv = state.agv_manager.agv_index[agv_id]
+                    return agv.util_since_last_charge / state.time if state.time > 0 else 0
+
+            elif self.reward_setting == 7:
+                total_queue = state.trackers.n_queued_delivery_orders + state.trackers.n_queued_retrieval_orders
+                n_depleted_ratio = state.agv_manager.get_n_depleted_agvs() / state.agv_manager.n_agvs
+
+                # Use a fixed reference value instead of dynamic max
+                queue_capacity = 400  # or whatever makes sense for your system
+                queue_ratio = total_queue / queue_capacity
+
+                # Inverse relationship: reward depleted AGVs more when queue is small
+                if total_queue == 0:
+                    # Maximum reward for charging during empty queue
+                    if action == 0:
+                        reward = -1
+                else:
+                    # Decrease reward as queue grows
+                    reward = 1
+
+                # Optionally add penalty for high queue + high depletion
+                if queue_ratio > 0.3 and n_depleted_ratio > 0.3:
+                    reward -= (queue_ratio * n_depleted_ratio)
+
+                return reward
+
+            elif self.reward_setting == 8:
+                return - state.agv_manager.get_n_depleted_agvs()
+
+            elif self.reward_setting == 9:
+                current_service_time = state.trackers.average_service_time
+                delta_service_time = self.service_time_last_step - current_service_time
+                self.service_time_last_step = current_service_time
+                self.service_time_history.append(current_service_time)
+
+                # Only keep trend_window entries
+                if len(self.service_time_history) > self.trend_window:
+                    self.service_time_history.pop(0)
+
+
+                if len(self.service_time_history) < self.trend_window:
+                    return delta_service_time
+                else:
+                    x = np.arange(len(self.service_time_history))
+                    y = np.array(self.service_time_history)
+                    slope, _ = np.polyfit(x, y, 1)
+
+                    # Normalize by mean and invert (negative slope = improvement = positive reward)
+                    normalized_trend = -slope / np.mean(y)
+                    return delta_service_time - normalized_trend
+                    # return delta_service_time - slope
+
+            elif self.reward_setting == 10:
+                current_service_time = state.trackers.average_service_time
+                self.service_time_last_step = current_service_time
+                self.service_time_history.append(current_service_time)
+
+                # Only keep trend_window entries
+                if len(self.service_time_history) > self.trend_window:
+                    self.service_time_history.pop(0)
+
+                if len(self.service_time_history) < self.trend_window:
+                    return 0
+                else:
+                    x = np.arange(len(self.service_time_history))
+                    y = np.array(self.service_time_history)
+                    slope, _ = np.polyfit(x, y, 1)
+
+                    # Normalize by mean and invert (negative slope = improvement = positive reward)
+                    normalized_trend = -slope / np.mean(y)
+                    return normalized_trend
+
+            elif self.reward_setting == 11:
+                if self.n_observations == 0:
+                    self.n_observations += 1
+                    self.service_time_last_step = state.trackers.average_service_time
+                    return 0
+                self.n_observations += 1
+                current_service_time = state.trackers.average_service_time
+                delta_service_time = self.service_time_last_step - current_service_time
+                self.service_time_last_step = current_service_time
+                self.running_avg += delta_service_time
+                state.running_avg = self.running_avg
+                self.rewards.append(delta_service_time)
+                state.rewards = self.rewards
+                # self.n_orders_last_step = n_orders_now
+                return delta_service_time
+
+            elif self.reward_setting == 12:
+                agv_id = state.current_agv
+                if agv_id is None:
+                    return 0
+
+                agv = state.agv_manager.agv_index[agv_id]
+                agv_battery_level = agv.battery
+                to_charge = state.params.charging_thresholds[action] - agv_battery_level
+                charging_duration = to_charge / state.agv_manager.charging_rate
+                max_charging_duration = 60 / state.agv_manager.charging_rate
+                total_queue = state.trackers.n_queued_delivery_orders + state.trackers.n_queued_retrieval_orders
+                queue_ratio = total_queue / 600
+                action_ratio = charging_duration / max_charging_duration
+                # if action == 0:
+                #     return 1 + queue_ratio
+                # return (queue_ratio * action_ratio) - queue_ratio
+                # return queue_ratio * action_ratio
+                # penalty_for_high_queue = -2 * queue_ratio  # Increases penalty as queue grows
+                # efficiency_penalty = action_ratio * queue_ratio  # Lower penalty for efficient charging at low queues
+                # if action == 0:
+                #     return - queue_ratio
+                # if total_queue == 0:
+                #     return charging_duration
+                # return penalty_for_high_queue + efficiency_penalty
+                # return - (charging_duration / total_queue) - queue_ratio
+                # return action_ratio / queue_ratio
+                # def sigmoid_transform(x, k=10):
+                #     return 2 / (1 + np.exp(k * x)) - 1  # Maps to [-1, 1]
+                #
+                # if action == 0:
+                #     return sigmoid_transform(1 - queue_ratio)  # High queues -> good reward
+                # else:
+                #     # Combine queue and action ratios to reward low charging at high queues
+                #     return sigmoid_transform(action_ratio * queue_ratio)
+                avg_service_time = state.trackers.average_service_time
+                working_capacity = (agv.battery - 20) / state.params.consumption_rate_unloaded
+                if total_queue == 0:
+                    # variante 1: durch sevice time, variante 2: nur wc und cd, variante 3: mit max
+                    if action == 0:
+                        # When no orders, reward maintaining current working capacity
+                        return working_capacity #/ avg_service_time
+                    else:
+                        # When charging with no orders, consider only the opportunity cost
+                        # relative to potential future orders
+                        return -charging_duration #/ avg_service_time
+
+                if action == 0:
+                    return working_capacity / (total_queue * avg_service_time)
+                # capa that could be provided to the system but is lost due to charging
+                # if working_capacity > charging_duration:
+                #     opportunity_cost = - (charging_duration / (total_queue * state.trackers.average_service_time))
+                # else:
+                #     opportunity_cost = - (working_capacity / (total_queue * state.trackers.average_service_time))
+                opportunity_cost = - (charging_duration / (total_queue * state.trackers.average_service_time))
+                return opportunity_cost
+
+            elif self.reward_setting == 13:
+                agv_id = state.current_agv
+                if agv_id is None:
+                    return 0
+
+                agv = state.agv_manager.agv_index[agv_id]
+                agv_battery_level = agv.battery
+                to_charge = state.params.charging_thresholds[action] - agv_battery_level
+                charging_duration = to_charge / state.agv_manager.charging_rate
+                max_charging_duration = 60 / state.agv_manager.charging_rate
+                total_queue = state.trackers.n_queued_delivery_orders + state.trackers.n_queued_retrieval_orders
+                queue_ratio = total_queue / 600
+                action_ratio = charging_duration / max_charging_duration
+                if action == 0:
+                    return queue_ratio
+                return (queue_ratio * action_ratio) - queue_ratio
+
+            elif self.reward_setting == 14:
+                agv_id = state.current_agv
+                if agv_id is None:
+                    return 0
+
+                agv = state.agv_manager.agv_index[agv_id]
+                agv_battery_level = agv.battery
+                to_charge = state.params.charging_thresholds[action] - agv_battery_level
+                charging_duration = to_charge / state.agv_manager.charging_rate
+                max_charging_duration = 60 / state.agv_manager.charging_rate
+                total_queue = state.trackers.n_queued_delivery_orders + state.trackers.n_queued_retrieval_orders
+                queue_ratio = total_queue / 600
+                action_ratio = charging_duration / max_charging_duration
+                if action == 0:
+                    return 1 + queue_ratio
+                # return (queue_ratio * action_ratio) - queue_ratio
+                # return queue_ratio * action_ratio
+                penalty_for_high_queue = -2 * queue_ratio  # Increases penalty as queue grows
+                efficiency_penalty = action_ratio * (
+                        1 - queue_ratio)  # Lower penalty for efficient charging at low queues
+
+                return penalty_for_high_queue + efficiency_penalty
+
+            elif self.reward_setting == 15:
+                agv_id = state.current_agv
+                if agv_id is None:
+                    return 0
+
+                agv = state.agv_manager.agv_index[agv_id]
+                agv_battery_level = agv.battery
+                to_charge = state.params.charging_thresholds[action] - agv_battery_level
+                charging_duration = to_charge / state.agv_manager.charging_rate
+                max_charging_duration = 60 / state.agv_manager.charging_rate
+                total_queue = state.trackers.n_queued_delivery_orders + state.trackers.n_queued_retrieval_orders
+                queue_ratio = total_queue / 600
+                action_ratio = charging_duration / max_charging_duration
+                # if action == 0:
+                #     return 1 + queue_ratio
+                # return (queue_ratio * action_ratio) - queue_ratio
+                # return queue_ratio * action_ratio
+                # penalty_for_high_queue = -2 * queue_ratio  # Increases penalty as queue grows
+                # efficiency_penalty = action_ratio * queue_ratio  # Lower penalty for efficient charging at low queues
+                # if action == 0:
+                #     return - queue_ratio
+                # if total_queue == 0:
+                #     return charging_duration
+                # return penalty_for_high_queue + efficiency_penalty
+                # return - (charging_duration / total_queue) - queue_ratio
+                # return action_ratio / queue_ratio
+                # def sigmoid_transform(x, k=10):
+                #     return 2 / (1 + np.exp(k * x)) - 1  # Maps to [-1, 1]
+                #
+                # if action == 0:
+                #     return sigmoid_transform(1 - queue_ratio)  # High queues -> good reward
+                # else:
+                #     # Combine queue and action ratios to reward low charging at high queues
+                #     return sigmoid_transform(action_ratio * queue_ratio)
+                avg_service_time = state.trackers.average_service_time
+                max_capacity = 80 / state.params.consumption_rate_unloaded
+                working_capacity = (agv.battery - 20) / state.params.consumption_rate_unloaded
+                if total_queue == 0:
+                    if action == 0:
+                        # When no orders, reward having high work capacity
+                        return working_capacity / max_capacity  # avg_service_time
+                    else:
+                        # When charging with no orders, reward
+                        return - charging_duration / max_charging_duration  # avg_service_time
+
+                if action == 0:
+                    return working_capacity / (total_queue * avg_service_time)
+                # capa that could be provided to the system but is lost due to charging
+                # if working_capacity > charging_duration:
+                #     opportunity_cost = - (charging_duration / (total_queue * state.trackers.average_service_time))
+                # else:
+                #     opportunity_cost = - (working_capacity / (total_queue * state.trackers.average_service_time))
+                current_working_battery = 0
+                for agv_id, agv in state.agv_manager.agv_index.items():
+                    current_working_battery += agv.battery - 20
+                current_working_capa = current_working_battery / (
+                        (state.params.consumption_rate_unloaded +
+                         state.params.consumption_rate_unloaded) / 2)
+                capacity_handled = current_working_capa / (total_queue * avg_service_time)
+                capacity_not_handled = capacity_handled * (total_queue * avg_service_time)
+
+                opportunity_cost = - (charging_duration / (total_queue * avg_service_time))
+                # opportunity_cost = - (charging_duration / capacity_not_handled)
+                return opportunity_cost
+            elif self.reward_setting == 16:
+                current_service_time = state.trackers.average_service_time
+                self.service_time_history.append(current_service_time)
+
+                # Only keep trend_window entries
+                if len(self.service_time_history) > self.trend_window:
+                    self.service_time_history.pop(0)
+
+                if len(self.service_time_history) < self.trend_window:
+                    return 0
+                else:
+                    x = np.arange(len(self.service_time_history))
+                    y = np.array(self.service_time_history)
+                    slope, _ = np.polyfit(x, y, 1)
+                    mean_service_time = np.mean(y)
+                    # Normalize by mean and invert (negative slope = improvement = positive reward)
+                    normalized_trend = -slope / mean_service_time
+                    level_reward = np.exp(-mean_service_time / 300) #- 1
+                    return normalized_trend + level_reward
+
+            elif self.reward_setting == 17:
+                current_service_time = state.trackers.average_service_time
+                self.service_time_history.append(current_service_time)
+
+                # Only keep trend_window entries
+                if len(self.service_time_history) > self.trend_window:
+                    self.service_time_history.pop(0)
+
+
+                agv_id = state.current_agv
+                if agv_id is None:
+                    return 0
+
+                agv = state.agv_manager.agv_index[agv_id]
+                agv_battery_level = agv.battery
+                to_charge = state.params.charging_thresholds[action] - agv_battery_level
+                charging_duration = to_charge / state.agv_manager.charging_rate
+                max_charging_duration = 60 / state.agv_manager.charging_rate
+                total_queue = state.trackers.n_queued_delivery_orders + state.trackers.n_queued_retrieval_orders
+                queue_ratio = total_queue / 600
+                action_ratio = charging_duration / max_charging_duration
+                normalized_trend = 0
+
+                # return (queue_ratio * action_ratio) - queue_ratio
+                # return queue_ratio * action_ratio
+                penalty_for_high_queue = -2 * queue_ratio  # Increases penalty as queue grows
+                efficiency_penalty = action_ratio * queue_ratio
+                if len(self.service_time_history) < self.trend_window:
+                    return 0
+                else:
+                    x = np.arange(len(self.service_time_history))
+                    y = np.array(self.service_time_history)
+                    slope, _ = np.polyfit(x, y, 1)
+
+                    # Normalize by mean and invert (negative slope = improvement = positive reward)
+                    normalized_trend = -slope #/ np.mean(y)
+                if action == 0:
+                    return 1 + queue_ratio + normalized_trend
+                return penalty_for_high_queue + efficiency_penalty + normalized_trend
+
+            elif self.reward_setting == 18:
+                current_service_time = state.trackers.average_service_time
+                if state.agv_manager.agv_trackers.n_charges == 0:
+                    self.service_time_last_step = state.trackers.average_service_time
+                    return 0
+                delta_service_time = self.service_time_last_step - current_service_time
+                self.service_time_last_step = current_service_time
+                self.running_avg += delta_service_time
+                state.running_avg = self.running_avg
+                self.rewards.append(delta_service_time)
+                state.rewards = self.rewards
+                agv_id = state.current_agv
+                if agv_id is None:
+                    return 0
+
+                agv = state.agv_manager.agv_index[agv_id]
+                agv_battery_level = agv.battery
+                to_charge = state.params.charging_thresholds[action] - agv_battery_level
+                charging_duration = to_charge / state.agv_manager.charging_rate
+                max_charging_duration = 60 / state.agv_manager.charging_rate
+                total_queue = state.trackers.n_queued_delivery_orders + state.trackers.n_queued_retrieval_orders
+                queue_ratio = total_queue / 600
+                action_ratio = charging_duration / max_charging_duration
+                avg_service_time = state.trackers.average_service_time
+                working_capacity = (agv.battery - 20) / state.params.consumption_rate_unloaded
+                if total_queue == 0:
+                    # reward charging if battery is low,
+                    # reward not charging if
+                    if action == 0:
+                        charging_value = 0
+                    else:
+                        charging_value = charging_duration / max_charging_duration
+                else:
+                    # reward charging at higher queues
+                    if action > 0:
+                        charging_value = action_ratio * queue_ratio
+                    else:
+                        charging_value = - queue_ratio
+                return charging_value + delta_service_time
+
+            elif self.reward_setting == 19:
+                # pallette in avg travel time + material handling -> lower bound
+                current_service_time = state.trackers.average_service_time
+                if state.agv_manager.agv_trackers.n_charges == 0:
+                    self.service_time_last_step = state.trackers.average_service_time
+                    return 0
+                delta_service_time = self.service_time_last_step - current_service_time
+                self.service_time_last_step = current_service_time
+                self.running_avg += delta_service_time
+                state.running_avg = self.running_avg
+                self.rewards.append(delta_service_time)
+                state.rewards = self.rewards
+                agv_id = state.current_agv
+                if agv_id is None:
+                    return 0
+
+                agv = state.agv_manager.agv_index[agv_id]
+                agv_battery_level = agv.battery
+                to_charge = state.params.charging_thresholds[action] - agv_battery_level
+                charging_duration = to_charge / state.agv_manager.charging_rate
+                max_charging_duration = 60 / state.agv_manager.charging_rate
+                total_queue = state.trackers.n_queued_delivery_orders + state.trackers.n_queued_retrieval_orders
+                avg_service_time = state.trackers.average_service_time
+                working_capacity = (agv.battery - 20) / state.params.consumption_rate_unloaded
+                # TODO total_queue == 0 raus, nivilieren
+                if total_queue == 0:
+                    # reward charging if battery is low,
+                    # if action == 0:
+                    #     charging_value = (agv.battery / 20) / 5
+                    # else:
+                    charging_value = charging_duration / max_charging_duration
+                else:
+                    # reward having high capacity during high queues
+                    charging_value = working_capacity / (total_queue * avg_service_time)
+                return delta_service_time + charging_value
+
+            elif self.reward_setting == 20:
+                agv_id = state.current_agv
+                if agv_id is None:
+                    return 0
+
+                agv = state.agv_manager.agv_index[agv_id]
+                working_capacity = (agv.battery - 20) / state.params.consumption_rate_unloaded
+                max_capa = 80 / state.params.consumption_rate_unloaded
+                charging_value = working_capacity / max_capa
+                return charging_value
         else:
             return 0
+
+    def _calculate_trend(self) -> float:
+        if len(self.service_time_history) < self.trend_window:
+            return 0.0
+
+        recent_history = self.service_time_history[-self.trend_window:]
+        x = np.arange(len(recent_history))
+        y = np.array(recent_history)
+
+        # Calculate slope using numpy's polyfit
+        slope, _ = np.polyfit(x, y, 1)
+
+        # Normalize slope and invert (negative slope = improvement = positive reward)
+        return -slope / np.mean(recent_history)
 
     @staticmethod
     def valid_action_mask(self, state: State):

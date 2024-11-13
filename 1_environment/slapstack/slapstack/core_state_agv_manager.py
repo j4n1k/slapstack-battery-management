@@ -1,4 +1,4 @@
-from collections import defaultdict
+from collections import defaultdict, deque
 from math import inf, hypot
 import typing
 from typing import Tuple, Dict, List, Union, Set, Deque
@@ -39,6 +39,7 @@ class AGV:
         self.n_charging_stops = 0
         self.orders_since_last_charge = 0
         self.charging = False
+        self.charge_started_at = -1
 
     def log_booking(self, booking_time: float):
         """
@@ -70,6 +71,7 @@ class AGV:
             self.n_charging_stops += 1
             self.charging_utilization += release_time - self.booking_time
             self.util_since_last_charge = 0
+            self.orders_since_last_charge = 0
 
 
 class AgvManager:
@@ -118,7 +120,7 @@ class AgvManager:
             tuple, np.argwhere(storage_matrix[:, :, 0]
                                == StorageKeys.CHARGING_STATION))))
         self.queued_charging_events: Dict[Tuple[int, int], Deque[Charging]] = {
-            cs: [] for cs in self.free_charging_stations}
+            cs: deque() for cs in self.free_charging_stations}
         self.router = router
         self.n_charging_stations = len(np.argwhere(self.router.s[:, :, 0]
                                                    == StorageKeys.CHARGING_STATION))

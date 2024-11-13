@@ -47,6 +47,33 @@ class LowTHChargePolicy(ChargingStrategy):
             return 0
 
 
+class OpportunityChargePolicy(ChargingStrategy):
+    def __init__(self):
+        super().__init__()
+        self.name = "opportunity"
+        self.type = "go_charging"
+    @staticmethod
+    def is_break(state: 'State'):
+        state_time = state.time
+        next_event_peek_time = state.next_main_event_time
+        time_delta = next_event_peek_time - state_time
+        max_duration = state.agv_manager.max_charging_time_frame
+        if (time_delta > max_duration) and (state_time != 0):
+            # if state.agv_manager.charge_in_break_started == False:
+            #     state.agv_manager.full_time_delta = time_delta
+            #     state.agv_manager.time_of_next_main_event = next_event_peek_time
+            #     state.agv_manager.charge_in_break_started = True
+            return True
+        else:
+            return False
+
+    def get_action(self, state: 'State', agv_id: int) -> int:
+        if (state.trackers.n_queued_retrieval_orders == 0 and
+                state.trackers.n_queued_delivery_orders == 0) or self.is_break(state):
+            return 1
+        else:
+            return 0
+
 class CombinedChargingPolicy(ChargingStrategy):
     def __init__(self, lower_threshold: float, upper_threshold: float):
         super().__init__()

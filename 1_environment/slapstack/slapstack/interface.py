@@ -585,7 +585,7 @@ class SlapEnv(gym.Env):
         agv = state.agv_manager.agv_index[agv_id]
         battery_level = agv.battery
         charging_thresholds = np.array(state.params.charging_thresholds)
-        if self.action_space.n == 2:
+        if self.action_space.n == 2 and state.params.charging_thresholds[1] == 100:
             mask = [1, 1]
             if battery_level < 20:
                 # If battery level is below 20%, action 0 (Don't charge) is invalid

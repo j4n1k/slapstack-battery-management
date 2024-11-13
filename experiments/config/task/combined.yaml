@@ -1,4 +1,4 @@
 task:
   name: "go_charging"
-  reward_setting: 4
+  reward_setting: 19
   charging_thresholds: [0, 30, 40, 50, 60, 70, 80]

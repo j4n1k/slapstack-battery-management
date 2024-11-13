@@ -62,7 +62,7 @@ def _init_run_loop(simulation_parameters,
 def run_episode(simulation_parameters: SimulationParameters,
                 charging_check_strategy,
                 partitions: list,
-                print_freq=0, stop_condition=False,
+                print_freq=10, stop_condition=False,
                 log_dir='', steps_per_episode=None,
                 action_converters=None):
     env, loop_controls = _init_run_loop(
@@ -101,12 +101,12 @@ def get_charging_strategies():
     charging_strategies = []
 
     charging_strategies += [
-        FixedChargePolicy(30),
+        # FixedChargePolicy(30),
         FixedChargePolicy(40),
-        FixedChargePolicy(50),
-        FixedChargePolicy(60),
-        FixedChargePolicy(70),
-        FixedChargePolicy(80),
+        # FixedChargePolicy(50),
+        # FixedChargePolicy(60),
+        # FixedChargePolicy(70),
+        # FixedChargePolicy(80),
         # FixedChargePolicy(90),
         # FixedChargePolicy(100),
         # RandomChargePolicy([40, 50, 60, 70, 80], 1)
@@ -133,12 +133,12 @@ if __name__ == '__main__':
     partitions_path = get_partitions_path("wepastacks_bm")
     delete_partitions_data(partitions_path)
     # parallel charging strat
-    n_partitions = 88
+    n_partitions = 1
     for pt in range(n_partitions):
         params = SimulationParameters(
             use_case="wepastacks_bm",
-            use_case_n_partitions=n_partitions,
-            use_case_partition_to_use=pt,
+            use_case_n_partitions=20,
+            use_case_partition_to_use=1,
             n_agvs=40,
             generate_orders=False,
             verbose=False,
@@ -152,8 +152,9 @@ if __name__ == '__main__':
             pallet_shift_penalty_factor=20,  # in seconds
             compute_feature_trackers=True,
             charging_thresholds=[40, 50, 60, 70, 80],
-            partition_by_day=True,
-            battery_capacity=52
+            partition_by_week=True,
+            battery_capacity=52,
+            charge_during_breaks=False
         )
         parallelize_heterogeneously(
             [run_episode] * n_charging_strategies,
@@ -162,7 +163,7 @@ if __name__ == '__main__':
                      [[None]] * n_charging_strategies,  # partitions to cycle
                      [0] * n_charging_strategies,                         # print_freq
                      [False] * n_charging_strategies,   # stop condition
-                     ['./result_data_charging_wepa/20cs/days52'] * n_charging_strategies,
+                     ['./result_data_charging_wepa/2cs'] * n_charging_strategies,
                      [None] * n_charging_strategies,
                      [[BatchFIFO(),
                       ClosestOpenLocation(very_greedy=False),

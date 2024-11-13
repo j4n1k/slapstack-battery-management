@@ -243,9 +243,8 @@ class LoopControl:
 
     def stop_prematurely(self):
         t = self.state.trackers
-        if (t.average_service_time > 1800
-                or t.n_queued_delivery_orders > 627
-                or t.n_queued_retrieval_orders > 693):
+        if (t.n_queued_delivery_orders > 240
+                or t.n_queued_retrieval_orders > 330):
             return True
         return False
 
