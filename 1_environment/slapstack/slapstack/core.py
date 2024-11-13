@@ -316,19 +316,19 @@ class SlapCore(gym.Env):
 
             next_event = None
             # if there are serviceable queued events, take care of them first.
-            if (retrieval_ok or delivery_ok) and \
-                    s.agv_manager.agv_available(order_type=None, only_new=True):
-                next_event = e.pop_queued_event(s)
-            # while retrieval_ok or delivery_ok:
-            #     if s.agv_manager.agv_available(order_type=None, only_new=True):
-            #         next_event = e.pop_queued_event(s)
-            #         break
-            #     else:
-            #         interrupted = self.interrupt_charging()
-            #         if interrupted:
-            #             continue
-            #         else:
-            #             break
+            # if (retrieval_ok or delivery_ok) and \
+            #         s.agv_manager.agv_available(order_type=None, only_new=True):
+            #     next_event = e.pop_queued_event(s)
+            while retrieval_ok or delivery_ok:
+                if s.agv_manager.agv_available(order_type=None, only_new=True):
+                    next_event = e.pop_queued_event(s)
+                    break
+                else:
+                    interrupted = self.interrupt_charging()
+                    if interrupted:
+                        continue
+                    else:
+                        break
 
             if next_event is None:
                 if not e.running:

@@ -1029,11 +1029,11 @@ class Charging(Event):
         travel = Relocation(state, self.cs_pos, self.agv_id)
         charging_event = None
         if agvm.queued_charging_events[self.cs_pos]:
-            charging_event = agvm.queued_charging_events[self.cs_pos].pop()
+            charging_event = agvm.queued_charging_events[self.cs_pos].popleft()
         else:
             for cs in agvm.queued_charging_events.keys():
                 if agvm.queued_charging_events[cs]:
-                    charging_event = agvm.queued_charging_events[cs].pop()
+                    charging_event = agvm.queued_charging_events[cs].popleft()
                     break
         agvm.update_trackers_on_charging_end()
         return travel, charging_event
