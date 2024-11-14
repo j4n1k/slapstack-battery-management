@@ -324,7 +324,8 @@ class SlapCore(gym.Env):
                     next_event = e.pop_queued_event(s)
                     break
                 else:
-                    interrupted = self.interrupt_charging()
+                    # interrupted = self.interrupt_charging()
+                    interrupted = False
                     if interrupted:
                         continue
                     else:
@@ -351,13 +352,15 @@ class SlapCore(gym.Env):
         for cq_pos in agvm.queued_charging_events.keys():
             charging_event_list = agvm.queued_charging_events[cq_pos]
             if charging_event_list:
-                charging_event = charging_event_list[0]
+                charging_event = charging_event_list[-1]
                 target_battery = charging_event.check_battery_charge(s)
 #                assert target_battery < 100
-                if target_battery >= 40:
-                    travel = charging_event.forced_handle(s, target_battery)
+                if target_battery >= 200:
+                    print("Hit200")
+                    travel, next_charging_event = charging_event.forced_handle(s, target_battery)
                     charging_event.intercepted = True
                     self.events.add_travel_event(travel)
+                    self.events.push_charging_event(next_charging_event)
                     return True
         return False
 
@@ -590,17 +593,24 @@ class SlapCore(gym.Env):
             action = prev_e.fixed_charging_duration
         # TODO Revisit EventType und Events
         # delivery_order: Union[Delivery, None] = None
+        queue = self.state.agv_manager.queued_charging_events[prev_e.last_node]
+        charge_finished = self.state.time
+        if queue:
+            current_charge_event = queue[-1]
+            charge_finished = current_charge_event.time
 
-        charging_event = Charging(self.state.time, charging_event_travel=prev_e,
+        charging_event = Charging(charge_finished, charging_event_travel=prev_e,
                                   charging_duration=action)
         booked_cs = self.state.agv_manager.booked_charging_stations
-        queue = self.state.agv_manager.queued_charging_events[prev_e.last_node]
-        if prev_e.last_node in booked_cs:
-            if len(booked_cs[prev_e.last_node]) > 1:
-                queue.append(charging_event)
-                return None
-            else:
-                return charging_event
+        # if prev_e.last_node in booked_cs:
+        #     if len(booked_cs[prev_e.last_node]) > 1:
+        #         queue.append(charging_event)
+        #         return None
+        #     else:
+        #         queue.append(charging_event)
+        #         return charging_event
+        queue.append(charging_event)
+        return charging_event
 
     def __create_event_on_charging_check(self,
                                          action: int):

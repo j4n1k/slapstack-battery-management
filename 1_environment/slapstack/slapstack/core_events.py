@@ -1027,26 +1027,33 @@ class Charging(Event):
         agvm.n_charging_agvs -= 1
         agvm.release_charging_station(self.cs_pos, agvm.agv_index[self.agv_id])
         travel = Relocation(state, self.cs_pos, self.agv_id)
-        charging_event = None
+        # charging_event = None
+        queued_event = agvm.queued_charging_events[self.cs_pos][0]
+        try:
+            assert self == queued_event
+        except:
+            print()
+        #if agvm.queued_charging_events[self.cs_pos]:
+        _ = agvm.queued_charging_events[self.cs_pos].popleft()
         if agvm.queued_charging_events[self.cs_pos]:
-            charging_event = agvm.queued_charging_events[self.cs_pos].popleft()
-        else:
-            for cs in agvm.queued_charging_events.keys():
-                if agvm.queued_charging_events[cs]:
-                    charging_event = agvm.queued_charging_events[cs].popleft()
-                    break
+            next_charging = agvm.queued_charging_events[self.cs_pos][0]
+            assert next_charging.start_time == self.time
+        # else:
+        #     for cs in agvm.queued_charging_events.keys():
+        #         if agvm.queued_charging_events[cs]:
+        #             _ = agvm.queued_charging_events[cs].pop()
+        #             break
         agvm.update_trackers_on_charging_end()
-        return travel, charging_event
+        return travel
 
     def handle(self, state: 'State', core=None):
-        # 2024813, 39, 217
         if not self.intercepted:
             super().handle(state)
             agv = state.agv_manager.agv_index[self.agv_id]
             target_battery = (self.charging_duration * state.agv_manager.charging_rate) + agv.battery
-            travel, charging_event = self.forced_handle(state, target_battery)
+            travel = self.forced_handle(state, target_battery)
             return EventHandleInfo(False, travel, travel, None,
-                                   None, charging_event)
+                                   None, None)
         else:
             return EventHandleInfo(False, None, None, None, None)
         # agv = state.agv_manager.agv_index[self.agv_id]
@@ -1177,7 +1184,7 @@ class EventManager:
         if event_queueing_info.queued_charging_event_to_add:
             self.__print(f"added charging event to queue: "
                          f"{event_queueing_info.queued_charging_event_to_add}")
-            self.__push_charging_event(
+            self.push_charging_event(
                 event_queueing_info.queued_charging_event_to_add)
             assert len(self.running) > 0
 
@@ -1200,7 +1207,7 @@ class EventManager:
         else:
             self.queued_retrieval_orders[sku] = deque([order])
 
-    def __push_charging_event(self, event: Charging):
+    def push_charging_event(self, event: Charging):
         heap.heappush(self.running, event)
 
     def pop_future_event(self):

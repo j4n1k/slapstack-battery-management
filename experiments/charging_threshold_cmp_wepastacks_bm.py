@@ -101,8 +101,8 @@ def get_charging_strategies():
     charging_strategies = []
 
     charging_strategies += [
-        # FixedChargePolicy(30),
-        FixedChargePolicy(40),
+        FixedChargePolicy(30),
+        # FixedChargePolicy(40),
         # FixedChargePolicy(50),
         # FixedChargePolicy(60),
         # FixedChargePolicy(70),
