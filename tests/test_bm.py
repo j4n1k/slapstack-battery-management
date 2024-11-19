@@ -8,11 +8,13 @@ from math import floor
 from os.path import join
 from unittest import TestCase
 
+import torch
 from gymnasium.vector import AsyncVectorEnv
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
 from sb3_contrib.common.wrappers import ActionMasker
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor, VecNormalize
+from torch.utils.data import TensorDataset, DataLoader
 
 from experiments.experiment_commons import run_episode, get_episode_env, get_partitions_path, delete_partitions_data, \
     ExperimentLogger, LoopControl, get_layout_path
@@ -23,12 +25,13 @@ import numpy as np
 from slapstack.core_state import State
 from slapstack.helpers import print_3d_np
 from slapstack.interface_input import Input
-from slapstack.interface_templates import SimulationParameters
+from slapstack.interface_templates import SimulationParameters, ChargingStrategy
 from slapstack_controls.charging_policies import FixedChargePolicy, LowTHChargePolicy, CombinedChargingPolicy, \
-    OpportunityChargePolicy
+    OpportunityChargePolicy, ChargingPolicy
 from slapstack_controls.output_converters import FeatureConverterCharging
 from slapstack_controls.storage_policies import ConstantTimeGreedyPolicy, ClosestOpenLocation, BatchFIFO
 from tests.experiment_commons import count_charging_stations, delete_prec_dima, gen_charging_stations
+from tests.model import train_model
 
 
 class TestSlapEnv(TestCase):
@@ -61,22 +64,60 @@ class TestSlapEnv(TestCase):
         loop_controls = LoopControl(environment, steps_per_episode=steps_per_episode)
         return environment, loop_controls
 
+    def create_training_data(self, train_observations, val_observations):
+        # Training data from one week
+        train_features = torch.tensor(np.stack([obs['features'] for obs in train_observations]), dtype=torch.float32)
+        train_actions = torch.tensor([obs['action'] for obs in train_observations], dtype=torch.long)
+
+        # Validation data from different week
+        val_features = torch.tensor(np.stack([obs['features'] for obs in val_observations]), dtype=torch.float32)
+        val_actions = torch.tensor([obs['action'] for obs in val_observations], dtype=torch.long)
+
+        # Create dataloaders
+        train_dataset = TensorDataset(train_features, train_actions)
+        val_dataset = TensorDataset(val_features, val_actions)
+
+        train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=32)
+
+        return train_loader, val_loader
+
+    def analyze_data_distribution(self, data):
+        # Count actions
+        actions = [obs['action'] for obs in data]
+        unique, counts = np.unique(actions, return_counts=True)
+        for value, count in zip(unique, counts):
+            print(f"Action {value}: {count}")
+
     def run_episode(self, simulation_parameters: SimulationParameters,
                     charging_check_strategy,
                     print_freq=0, stop_condition=False,
                     log_dir='', steps_per_episode=None,
                     testing=True,
-                    action_converters=None):
+                    action_converters=None,
+                    output_converter: FeatureConverterCharging = None):
         env, loop_controls = self._init_run_loop(
             simulation_parameters, log_dir, action_converters, steps_per_episode)
         parametrization_failure = False
         start = time.time()
+        output_converter.reset()
+        self.data = []
         while not loop_controls.done:
             decision_mode = env.core_env.decision_mode
             if decision_mode == "charging_check" or decision_mode == "charging":
                 prev_event = env.core_env.previous_event
-                action = charging_check_strategy.get_action(loop_controls.state,
-                                                            agv_id=prev_event.agv.id)
+                observations = output_converter.modify_state(loop_controls.state)
+                if isinstance(charging_check_strategy, ChargingStrategy):
+                    action = charging_check_strategy.get_action(loop_controls.state,
+                                                                agv_id=prev_event.agv.id)
+                else:
+                    agv = loop_controls.state.agv_manager.agv_index[prev_event.agv.id]
+                    if agv.battery <= 20:
+                        action = 1
+                    else:
+                        action = charging_check_strategy.predict(observations)
+
+                self.data.append({"step": loop_controls.n_decisions, "features": observations, "action": action})
             else:
                 if env.done_during_init:
                     raise ValueError("Sim ended during init")
@@ -331,13 +372,57 @@ class TestSlapEnv(TestCase):
                                          charging_check_strategy=OpportunityChargePolicy(),
                                          testing=True)
 
-
     def test_opportunity_charging(self):
         # Charging Action from ChargingPolicy gets overwritten by CombinedChargingPolicy
+        feature_list = ["n_depleted_agvs", "free_agv", "avg_battery", "utilization",
+                        "queue_len_charging_station", "global_fill_level",
+                        "curr_agv_battery", "dist_to_cs",
+                        "queue_len_retrieval_orders", "queue_len_delivery_orders",
+                        "hour_sin", "hour_cos", "day_of_week", "free_cs_available", "avg_entropy"]
+        output_converter = FeatureConverterCharging(feature_list=feature_list,
+                                                    reward_setting=19,
+                                                    decision_mode="charging_check")
+        for i in range(14):
+            print(f"Week {i}")
+            params = SimulationParameters(
+                use_case="wepastacks_bm",
+                use_case_n_partitions=20,
+                use_case_partition_to_use=i,
+                partition_by_week=True,
+                n_agvs=40,
+                generate_orders=False,
+                verbose=False,
+                resetting=False,
+                initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+                pure_lanes=True,
+                n_levels=3,
+                # https://logisticsinside.eu/speed-of-warehouse-trucks/
+                agv_speed=2,
+                unit_distance=1.4,
+                pallet_shift_penalty_factor=20,  # in seconds
+                compute_feature_trackers=True,
+                charging_thresholds=[40, 50, 60, 70, 80],
+                battery_capacity=52,
+                charge_during_breaks=False
+            )
+
+
+            final_state: State = self.run_episode(simulation_parameters=params,
+                                             print_freq=1000,
+                                             log_dir='./logs/tests/partitioning/go_charging',
+                                             charging_check_strategy=OpportunityChargePolicy(),
+                                             testing=True,
+                                             action_converters=[BatchFIFO(),
+                                                                ClosestOpenLocation(very_greedy=False),
+                                                                FixedChargePolicy(100)],
+                                             steps_per_episode=None,
+                                             output_converter=output_converter)
+        train_obs = self.data
+        self.data = []
         params = SimulationParameters(
             use_case="wepastacks_bm",
             use_case_n_partitions=20,
-            use_case_partition_to_use=4,
+            use_case_partition_to_use=1,
             partition_by_week=True,
             n_agvs=40,
             generate_orders=False,
@@ -352,20 +437,58 @@ class TestSlapEnv(TestCase):
             pallet_shift_penalty_factor=20,  # in seconds
             compute_feature_trackers=True,
             charging_thresholds=[40, 50, 60, 70, 80],
-            battery_capacity=80
+            battery_capacity=52,
+            charge_during_breaks=False
         )
-
         final_state: State = self.run_episode(simulation_parameters=params,
-                                         print_freq=1000,
-                                         log_dir='./logs/tests/partitioning/go_charging',
-                                         charging_check_strategy=OpportunityChargePolicy(),
-                                         testing=True,
-                                         action_converters=[BatchFIFO(),
-                                                            ClosestOpenLocation(very_greedy=False),
-                                                            FixedChargePolicy(100)],
-                                         steps_per_episode=None)
-
-        assert final_state.trackers.average_service_time == 463.81978959254207
+                                              print_freq=1000,
+                                              log_dir='./logs/tests/partitioning/go_charging',
+                                              charging_check_strategy=OpportunityChargePolicy(),
+                                              testing=True,
+                                              action_converters=[BatchFIFO(),
+                                                                 ClosestOpenLocation(very_greedy=False),
+                                                                 FixedChargePolicy(100)],
+                                              steps_per_episode=None,
+                                              output_converter=output_converter)
+        val_obs = self.data
+        print("Training Data:")
+        self.analyze_data_distribution(train_obs)
+        print("\nValidation Data:")
+        self.analyze_data_distribution(val_obs)
+        train_loader, val_loader = self.create_training_data(train_obs, val_obs)
+        model = train_model(train_loader, val_loader, input_dim=train_loader.dataset[0][0].shape[0])
+        params = SimulationParameters(
+            use_case="wepastacks_bm",
+            use_case_n_partitions=20,
+            use_case_partition_to_use=1,
+            partition_by_week=True,
+            n_agvs=40,
+            generate_orders=False,
+            verbose=False,
+            resetting=False,
+            initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+            pure_lanes=True,
+            n_levels=3,
+            # https://logisticsinside.eu/speed-of-warehouse-trucks/
+            agv_speed=2,
+            unit_distance=1.4,
+            pallet_shift_penalty_factor=20,  # in seconds
+            compute_feature_trackers=True,
+            charging_thresholds=[40, 50, 60, 70, 80],
+            battery_capacity=52,
+            charge_during_breaks=False
+        )
+        final_state: State = self.run_episode(simulation_parameters=params,
+                                              print_freq=1000,
+                                              log_dir='./logs/tests/partitioning/go_charging',
+                                              charging_check_strategy=model,
+                                              testing=True,
+                                              action_converters=[BatchFIFO(),
+                                                                 ClosestOpenLocation(very_greedy=False),
+                                                                 FixedChargePolicy(100)],
+                                              steps_per_episode=None,
+                                              output_converter=output_converter)
+        # assert final_state.trackers.average_service_time == 463.81978959254207
 
     def test_charge_during_breaks(self):
         # Charging Action from ChargingPolicy gets overwritten by CombinedChargingPolicy

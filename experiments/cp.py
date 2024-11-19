@@ -149,21 +149,27 @@ class SLAPCPModel:
             self.delivery_loc[d] = self.model.NewIntVar(0, len(self.I) - 1, f'delivery_loc_{d}')
             self.delivery_agv[d] = self.model.NewIntVar(0, len(self.K) - 1, f'delivery_agv_{d}')
 
-        self.retrieval_time = {}
-        self.retrieval_loc = {}
-        self.retrieval_agv = {}
-
-        for r in range(len(self.retrievals)):
-            self.retrieval_time[r] = self.model.NewIntVar(
-                self.retrievals[r]['arrival_time'], max_time - 1, f'retrieval_time_{r}')
-            self.retrieval_loc[r] = self.model.NewIntVar(0, len(self.I) - 1, f'retrieval_loc_{r}')
-            self.retrieval_agv[r] = self.model.NewIntVar(0, len(self.K) - 1, f'retrieval_agv_{r}')
+        # self.retrieval_time = {}
+        # self.retrieval_loc = {}
+        # self.retrieval_agv = {}
+        #
+        # for r in range(len(self.retrievals)):
+        #     self.retrieval_time[r] = self.model.NewIntVar(
+        #         self.retrievals[r]['arrival_time'], max_time - 1, f'retrieval_time_{r}')
+        #     self.retrieval_loc[r] = self.model.NewIntVar(0, len(self.I) - 1, f'retrieval_loc_{r}')
+        #     self.retrieval_agv[r] = self.model.NewIntVar(0, len(self.K) - 1, f'retrieval_agv_{r}')
 
         # Storage state
         self.storage = {}
         for i in self.I:
             for t in self.T:
                 self.storage[i, t] = self.model.NewIntVar(-1, len(self.S) - 1, f'storage_{i}_{t}')
+
+        self.position = {}
+        for i in self.I:
+            for k in self.K:
+                for t in self.T:
+                    self.position[i, k, t] = self.model.NewIntVar(-1, len(self.S) - 1, f"agv_{k}_at_pos{i}_at{t}")
 
     def _create_constraints(self):
         # Initial storage state
@@ -191,18 +197,18 @@ class SLAPCPModel:
                     self.model.Add(self.storage[i, t] == -1).OnlyEnforceIf(delivery_here)
 
                 # Storage updates from retrievals
-                for r in range(len(self.retrievals)):
-                    retrieval_here = self.model.NewBoolVar(f'retrieval_{r}_at_{i}_{t}')
-                    # Location matches
-                    self.model.Add(self.retrieval_loc[r] == i).OnlyEnforceIf(retrieval_here)
-                    # Time matches
-                    self.model.Add(self.retrieval_time[r] == t).OnlyEnforceIf(retrieval_here)
-                    # Location becomes empty after retrieval
-                    self.model.Add(self.storage[i, t + 1] == -1).OnlyEnforceIf(retrieval_here)
-                    # Must have correct SKU for retrieval
-                    self.model.Add(
-                        self.storage[i, t] == self.retrievals[r]['sku']
-                    ).OnlyEnforceIf(retrieval_here)
+                # for r in range(len(self.retrievals)):
+                #     retrieval_here = self.model.NewBoolVar(f'retrieval_{r}_at_{i}_{t}')
+                #     # Location matches
+                #     self.model.Add(self.retrieval_loc[r] == i).OnlyEnforceIf(retrieval_here)
+                #     # Time matches
+                #     self.model.Add(self.retrieval_time[r] == t).OnlyEnforceIf(retrieval_here)
+                #     # Location becomes empty after retrieval
+                #     self.model.Add(self.storage[i, t + 1] == -1).OnlyEnforceIf(retrieval_here)
+                #     # Must have correct SKU for retrieval
+                #     self.model.Add(
+                #         self.storage[i, t] == self.retrievals[r]['sku']
+                #     ).OnlyEnforceIf(retrieval_here)
 
         # AGV constraints - no overlapping tasks
         for k in self.K:
@@ -215,12 +221,12 @@ class SLAPCPModel:
                     self.model.Add(self.delivery_agv[d] == k).OnlyEnforceIf(task_here)
                     self.model.Add(self.delivery_time[d] == t).OnlyEnforceIf(task_here)
                     agv_tasks.append(task_here)
-
-                for r in range(len(self.retrievals)):
-                    task_here = self.model.NewBoolVar(f'agv_{k}_retrieval_{r}_at_{t}')
-                    self.model.Add(self.retrieval_agv[r] == k).OnlyEnforceIf(task_here)
-                    self.model.Add(self.retrieval_time[r] == t).OnlyEnforceIf(task_here)
-                    agv_tasks.append(task_here)
+                #
+                # for r in range(len(self.retrievals)):
+                #     task_here = self.model.NewBoolVar(f'agv_{k}_retrieval_{r}_at_{t}')
+                #     self.model.Add(self.retrieval_agv[r] == k).OnlyEnforceIf(task_here)
+                #     self.model.Add(self.retrieval_time[r] == t).OnlyEnforceIf(task_here)
+                #     agv_tasks.append(task_here)
 
                 # At most one task per AGV per time
                 self.model.Add(sum(agv_tasks) <= 1)
@@ -231,18 +237,18 @@ class SLAPCPModel:
                 # Different times for different deliveries
                 self.model.Add(self.delivery_time[d1] != self.delivery_time[d2])
 
-        for r1 in range(len(self.retrievals)):
-            for r2 in range(r1 + 1, len(self.retrievals)):
-                # Different times for different retrievals
-                self.model.Add(self.retrieval_time[r1] != self.retrieval_time[r2])
+        # for r1 in range(len(self.retrievals)):
+        #     for r2 in range(r1 + 1, len(self.retrievals)):
+        #         # Different times for different retrievals
+        #         self.model.Add(self.retrieval_time[r1] != self.retrieval_time[r2])
 
     def _set_objective(self):
         total_time = 0
         # Minimize completion times relative to arrival times
         for d in range(len(self.deliveries)):
             total_time += self.delivery_time[d] - self.deliveries[d]['arrival_time']
-        for r in range(len(self.retrievals)):
-            total_time += self.retrieval_time[r] - self.retrievals[r]['arrival_time']
+        # for r in range(len(self.retrievals)):
+        #     total_time += self.retrieval_time[r] - self.retrievals[r]['arrival_time']
         self.model.Minimize(total_time)
 
     def solve(self, time_limit=None):
@@ -272,12 +278,12 @@ class SLAPCPModel:
             }
 
         # Extract retrievals
-        for r in range(len(self.retrievals)):
-            solution['retrievals'][r] = {
-                'time': solver.Value(self.retrieval_time[r]),
-                'location': solver.Value(self.retrieval_loc[r]),
-                'agv': solver.Value(self.retrieval_agv[r])
-            }
+        # for r in range(len(self.retrievals)):
+        #     solution['retrievals'][r] = {
+        #         'time': solver.Value(self.retrieval_time[r]),
+        #         'location': solver.Value(self.retrieval_loc[r]),
+        #         'agv': solver.Value(self.retrieval_agv[r])
+        #     }
 
         # Extract storage state
         for t in self.T:

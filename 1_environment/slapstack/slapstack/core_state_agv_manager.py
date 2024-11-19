@@ -126,7 +126,7 @@ class AgvManager:
                                                    == StorageKeys.CHARGING_STATION))
         print(self.n_charging_stations)
         self.agv_trackers = AGVTrackers(self)
-        self.max_charging_time_frame = 14400
+        self.max_charging_time_frame = 14400 # 14400
         self.charge_in_break_started = False
         self.first_charge_during_break = False
         self.full_time_delta = 0
@@ -384,8 +384,8 @@ class AgvManager:
         if agv.available_forks == 0:
             if not charging_booking:
                 self.n_busy_agvs += 1
-            else:
-                self.n_charging_agvs += 1
+            # else:
+            #     self.n_charging_agvs += 1
             self.n_free_agvs -= 1
             self.free_agv_positions[agv_pos].pop(free_agv_index)
         if not self.free_agv_positions[agv_pos]:
@@ -491,7 +491,7 @@ class AgvManager:
         try:
             assert agv.battery <= 100
         except:
-            print()
+            print("battery > 100")
 
     def deplete_battery(self, t, loaded: bool, agv_id: int):
         agv = self.agv_index[agv_id]
@@ -516,7 +516,10 @@ class AgvManager:
             self.booked_charging_stations[cs] = [agv]
 
     def release_charging_station(self, cs: Tuple[int, int], agv: AGV):
-        idx = self.booked_charging_stations[cs].index(agv)
+        try:
+            idx = self.booked_charging_stations[cs].index(agv)
+        except:
+            print("no cs booked")
         self.booked_charging_stations[cs].pop(idx)
         if len(self.booked_charging_stations[cs]) == 0:
             self.free_charging_stations.add(cs)

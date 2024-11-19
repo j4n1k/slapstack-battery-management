@@ -101,14 +101,14 @@ def get_charging_strategies():
     charging_strategies = []
 
     charging_strategies += [
-        FixedChargePolicy(30),
+        # FixedChargePolicy(30),
         # FixedChargePolicy(40),
         # FixedChargePolicy(50),
         # FixedChargePolicy(60),
         # FixedChargePolicy(70),
         # FixedChargePolicy(80),
         # FixedChargePolicy(90),
-        # FixedChargePolicy(100),
+        FixedChargePolicy(100),
         # RandomChargePolicy([40, 50, 60, 70, 80], 1)
     ]
 
@@ -163,7 +163,7 @@ if __name__ == '__main__':
                      [[None]] * n_charging_strategies,  # partitions to cycle
                      [0] * n_charging_strategies,                         # print_freq
                      [False] * n_charging_strategies,   # stop condition
-                     ['./result_data_charging_wepa/2cs'] * n_charging_strategies,
+                     ['./result_data_charging_wepa/2cs/interrupt'] * n_charging_strategies,
                      [None] * n_charging_strategies,
                      [[BatchFIFO(),
                       ClosestOpenLocation(very_greedy=False),

@@ -8,17 +8,23 @@ experiment:
   name: "agv_charging_rl"
   setting: "train"
   log_dir: "./logs"
-  total_timesteps: 8000000
+  total_timesteps: 4000000
   eval_freq: 100000
-  n_eval_episodes: 2
-  t_pt: [1, 2]
-  e_pt: [1, 2]
+  n_eval_episodes: 1
+  t_pt: [1]
+  e_pt: [1]
   n_cs: 2
   feature_list: ["n_depleted_agvs", "free_agv", "avg_battery", "utilization",
                 "queue_len_charging_station", "global_fill_level",
                 "curr_agv_battery", "dist_to_cs",
                 "queue_len_retrieval_orders", "queue_len_delivery_orders",
-                "hour_sin", "hour_cos", "day_of_week"]
+                "hour_sin", "hour_cos", "day_of_week", "free_cs_available", "avg_entropy"]
+
+#  ["n_depleted_agvs", "free_agv", "avg_battery", "utilization",
+#                "queue_len_charging_station", "global_fill_level",
+#                "curr_agv_battery", "dist_to_cs",
+#                "queue_len_retrieval_orders", "queue_len_delivery_orders",
+#                "hour_sin", "hour_cos", "day_of_week"]
   # entropy
 
   id: "${now:%Y%m%d_%H%M%S}_20cs-40agv-14pt-wepa" # 20cs-40agv-14pt-wepa #7cs-20agv-1pt-cross-4reward

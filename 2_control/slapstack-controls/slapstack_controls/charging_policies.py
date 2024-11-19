@@ -57,6 +57,8 @@ class OpportunityChargePolicy(ChargingStrategy):
         state_time = state.time
         next_event_peek_time = state.next_main_event_time
         time_delta = next_event_peek_time - state_time
+        if time_delta > 0:
+            print(time_delta)
         max_duration = state.agv_manager.max_charging_time_frame
         if (time_delta > max_duration) and (state_time != 0):
             # if state.agv_manager.charge_in_break_started == False:
@@ -68,11 +70,25 @@ class OpportunityChargePolicy(ChargingStrategy):
             return False
 
     def get_action(self, state: 'State', agv_id: int) -> int:
-        if (state.trackers.n_queued_retrieval_orders == 0 and
-                state.trackers.n_queued_delivery_orders == 0) or self.is_break(state):
-            return 1
-        else:
+        agvm = state.agv_manager
+        agv = agvm.agv_index[agv_id]
+        queue = agvm.queued_charging_events
+        is_break = self.is_break(state)
+        if agv.battery >= 100:
             return 0
+        if agv.battery <= 20:
+            return 1
+        # if is_break:
+        #     return 1
+        if (state.trackers.n_queued_retrieval_orders == 0 and
+                state.trackers.n_queued_delivery_orders == 0):
+            for cs in agvm.charging_stations:
+                if not queue[cs]:
+                    return 1
+                else:
+                    if len(queue[cs]) <= 1:
+                        return 1
+        return 0
 
 class CombinedChargingPolicy(ChargingStrategy):
     def __init__(self, lower_threshold: float, upper_threshold: float):

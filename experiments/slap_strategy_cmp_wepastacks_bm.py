@@ -2,7 +2,7 @@ from typing import List
 
 from experiment_commons import run_episode
 from slapstack.interface_templates import SimulationParameters
-from slapstack_controls.charging_policies import FixedChargePolicy, LowTHChargePolicy
+from slapstack_controls.charging_policies import FixedChargePolicy, LowTHChargePolicy, OpportunityChargePolicy
 from slapstack_controls.storage_policies import (ClassBasedPopularity,
                                                  ClassBasedCycleTime,
                                                  ClosestOpenLocation, ConstantTimeGreedyPolicy)
@@ -43,7 +43,8 @@ storage_policies = get_storage_strategies([2, 3, 5])
 params = SimulationParameters(
     use_case="wepastacks_bm",
     use_case_n_partitions=20,
-    use_case_partition_to_use=0,
+    use_case_partition_to_use=1,
+    partition_by_week=True,
     n_agvs=40,
     generate_orders=False,
     verbose=False,
@@ -55,7 +56,9 @@ params = SimulationParameters(
     agv_speed=2,
     unit_distance=1.4,
     pallet_shift_penalty_factor=20,  # in seconds
-    compute_feature_trackers=True
+    compute_feature_trackers=True,
+    battery_capacity=52,
+    charge_during_breaks=False
 )
 
 if __name__ == '__main__':
@@ -63,10 +66,10 @@ if __name__ == '__main__':
     for i in range(0, n_strategies):
         run_episode(simulation_parameters=params,
                     storage_strategy=storage_policies[i],
-                    charging_strategy=FixedChargePolicy(70),
+                    charging_strategy=FixedChargePolicy(100),
                     print_freq=1000, warm_start=True,
-                    log_dir='./result_data_wepa/',
-                    charging_check_strategy=LowTHChargePolicy(20),)
+                    log_dir='./result_data_wepa/week1/cib',
+                    charging_check_strategy=OpportunityChargePolicy())
 
     # parallelize_heterogeneously(
     #     [run_episode] * n_strategies,

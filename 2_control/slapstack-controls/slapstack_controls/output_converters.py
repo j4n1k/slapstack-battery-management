@@ -336,6 +336,17 @@ class FeatureConverterCharging(OutputConverter):
             pass
 
     @staticmethod
+    def f_get_is_break(state: 'State'):
+        state_time = state.time
+        next_event_peek_time = state.next_main_event_time
+        time_delta = next_event_peek_time - state_time
+        max_duration = state.agv_manager.max_charging_time_frame
+        if (time_delta > max_duration) and (state_time != 0):
+            return 1
+        else:
+            return 0
+
+    @staticmethod
     def f_get_avg_battery(state: State):
         return state.agv_manager.get_average_agv_battery() / 100
 
@@ -439,15 +450,28 @@ class FeatureConverterCharging(OutputConverter):
         return np.std(self.fill_level_per_lane)
 
     def f_get_avg_entropy(self, state: State):
-        lt = state.location_manager.location_trackers
-        lane_entropy = lt.lane_wise_entropies.values()
-        return sum(lane_entropy) / len(lane_entropy)
+        lane_entropies = state.location_manager.lane_wise_entropies
+        average_entropy = 0
+        for lane, entropy in lane_entropies.items():
+            average_entropy += entropy
+        return average_entropy / len(lane_entropies)
 
     @staticmethod
     def f_get_global_fill_level(state: State):
         # lt: LocationTrackers = state.location_manager.location_trackers
         # return 1 - lt.n_open_locations / lt.n_total_locations
         return state.trackers.get_fill_level()
+
+    def f_get_free_cs_available(self, state: State):
+        agvm = state.agv_manager
+        queue = agvm.queued_charging_events
+        for cs in agvm.charging_stations:
+            if not queue[cs]:
+                return 1
+            else:
+                if len(queue[cs]) <= 1:
+                    return 1
+        return 0
 
     def f_get_queue_len_charging_station(self, state: State):
         agvm = state.agv_manager
@@ -1112,6 +1136,21 @@ class FeatureConverterCharging(OutputConverter):
                 max_capa = 80 / state.params.consumption_rate_unloaded
                 charging_value = working_capacity / max_capa
                 return charging_value
+
+            elif self.reward_setting == 21:
+                reward = 0
+                free_cs = self.f_get_free_cs_available(state)
+                total_queue = state.trackers.n_queued_delivery_orders + state.trackers.n_queued_retrieval_orders
+                if total_queue == 0 and action == 1:
+                    reward += 1
+                if free_cs and action == 1:
+                    reward += 1
+                elif not free_cs and action == 1:
+                    reward -= 1
+                n_charging_agvs_ratio = state.agv_manager.n_charging_agvs / state.agv_manager.n_agvs
+                return reward - n_charging_agvs_ratio
+
+
         else:
             return 0
 

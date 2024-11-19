@@ -105,7 +105,7 @@ class SlapEnv(gym.Env):
         if self.__core.state.params.charging_thresholds:
             self.last_action_taken = action
         else:
-            self.last_action_taken = action[0]
+            self.last_action_taken = action#[0]
         decision_mode = self.__core.decision_mode
         direct_action = self.__transform_action(action)
         state, done = self.__core.step(direct_action)
