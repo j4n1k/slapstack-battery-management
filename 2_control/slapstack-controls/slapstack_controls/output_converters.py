@@ -360,6 +360,37 @@ class FeatureConverterCharging(OutputConverter):
         return np.average(list(at.charges_per_agv.values()))
 
     @staticmethod
+    def f_get_n_free_agv(state: State):
+        return state.agv_manager.n_free_agvs / state.agv_manager.n_agvs
+
+    @staticmethod
+    def f_get_n_working_agvs(state: State):
+        n_busy = state.agv_manager.get_n_busy_agvs()
+        n_free = state.agv_manager.n_free_agvs
+        n_charging = state.agv_manager.get_n_depleted_agvs()
+        n_agvs = state.agv_manager.n_agvs
+        try:
+
+            assert (n_busy + n_free + n_charging == n_agvs)
+        except:
+            print(f"Missmatch: busy: {n_busy}, free: {n_free}, "
+                  f"charging: {n_charging}, sum: {n_busy + n_free + n_charging}")
+        return n_busy / n_agvs
+
+    @staticmethod
+    def f_get_n_depleted_agvs(state: State):
+        agvm = state.agv_manager
+        return agvm.get_n_depleted_agvs() / agvm.n_agvs
+
+    @staticmethod
+    def f_get_avg_battery_working(state: State):
+        return state.agv_manager.get_average_agv_battery_working() / 100
+
+    @staticmethod
+    def f_get_avg_battery_charging(state: State):
+        return state.agv_manager.get_average_agv_battery_charging() / 100
+
+    @staticmethod
     def f_get_curr_agv_battery(state: State):
         agv_id = state.current_agv
         if agv_id == None:
@@ -375,11 +406,6 @@ class FeatureConverterCharging(OutputConverter):
             if agv.battery == 0:
                 print()
             return agv.battery / 100
-
-    @staticmethod
-    def f_get_n_depleted_agvs(state: State):
-        agvm = state.agv_manager
-        return agvm.get_n_depleted_agvs() / agvm.n_agvs
 
     @staticmethod
     def f_get_time_next_event(state: State):
@@ -472,6 +498,44 @@ class FeatureConverterCharging(OutputConverter):
                 if len(queue[cs]) <= 1:
                     return 1
         return 0
+
+    @staticmethod
+    def f_get_battery_cs(state: State):
+        agvm = state.agv_manager
+        queue = agvm.queued_charging_events
+        battery_levels = []
+        for cs in agvm.charging_stations:
+            if not queue[cs]:
+                battery_levels.append(0)
+            else:
+                charging_event = queue[cs][0]
+                curr_battery = charging_event.check_battery_charge(state)
+                battery_levels.append(curr_battery)
+        return np.mean(battery_levels) / 100
+
+    @staticmethod
+    def f_get_battery_cs1(state: State):
+        agvm = state.agv_manager
+        cs = agvm.charging_stations[0]
+        queue = agvm.queued_charging_events[cs]
+        if queue:
+            charging_event = queue[0]
+            curr_battery = charging_event.check_battery_charge(state)
+            return curr_battery / 100
+        else:
+            return 0
+
+    @staticmethod
+    def f_get_battery_cs2(state: State):
+        agvm = state.agv_manager
+        cs = agvm.charging_stations[1]
+        queue = agvm.queued_charging_events[cs]
+        if queue:
+            charging_event = queue[0]
+            curr_battery = charging_event.check_battery_charge(state)
+            return curr_battery / 100
+        else:
+            return 0
 
     def f_get_queue_len_charging_station(self, state: State):
         agvm = state.agv_manager
@@ -621,10 +685,6 @@ class FeatureConverterCharging(OutputConverter):
     def f_get_orders_not_served(state: State):
         pass
 
-    @staticmethod
-    def f_get_free_agv(state: State):
-        return state.agv_manager.n_free_agvs / state.agv_manager.n_agvs
-
     def modify_state(self, state: State) -> np.ndarray:
         # if state.decision_mode == "charging":
         if state.agv_manager.agv_trackers.n_charges == 0:
@@ -676,6 +736,9 @@ class FeatureConverterCharging(OutputConverter):
         #     self.feature_stack = np.zeros((0, 0))
 
         if decision_mode == self.decision_mode and not isinstance(action, tuple):
+            if action.shape[0] == 2:
+                action, interrupt_action = action
+                interrupt_action -= 1
             # Reward 0
             # return - state.trackers.average_service_time
 
@@ -1149,6 +1212,92 @@ class FeatureConverterCharging(OutputConverter):
                     reward -= 1
                 n_charging_agvs_ratio = state.agv_manager.n_charging_agvs / state.agv_manager.n_agvs
                 return reward - n_charging_agvs_ratio
+
+            elif self.reward_setting == 22:
+                charging_duration = action
+                agv_id = state.current_agv
+                total_queue = state.trackers.n_queued_delivery_orders + state.trackers.n_queued_retrieval_orders
+                if total_queue == 0:
+                    total_queue = 1
+                if agv_id is None:
+                    return 0
+                agv = state.agv_manager.agv_index[agv_id]
+                agv_battery_level = agv.battery
+                to_charge = state.params.charging_thresholds[action] - agv_battery_level
+                charging_duration = to_charge / state.agv_manager.charging_rate
+                agvm = state.agv_manager
+                cs_queue = agvm.queued_charging_events
+                cs = agvm.get_charging_station(agv.position)
+                pot_start_time = state.time
+                if cs_queue[cs]:
+                    pot_start_time = cs_queue[cs][-1].time
+                pot_finish_time = pot_start_time + charging_duration
+                t_out_of_system = pot_finish_time - state.time
+                curr_avg_st = state.trackers.average_service_time
+                n_free_agv_ratio = state.agv_manager.n_free_agvs / state.agv_manager.n_agvs
+                return - t_out_of_system # / (curr_avg_st * total_queue) # + n_free_agv_ratio
+
+            elif self.reward_setting == 23:
+                n_charging_agvs_ratio = state.agv_manager.n_charging_agvs / state.agv_manager.n_agvs
+                return - n_charging_agvs_ratio
+
+            elif self.reward_setting == 24:
+                reward = 0
+                free_cs = self.f_get_free_cs_available(state)
+                total_queue = state.trackers.n_queued_delivery_orders + state.trackers.n_queued_retrieval_orders
+                if total_queue == 0 and action == 1:
+                    reward += 1
+                if free_cs and action == 1:
+                    reward += 1
+                elif not free_cs and action == 1:
+                    reward -= 1
+                n_charging_agvs_ratio = state.agv_manager.n_charging_agvs / state.agv_manager.n_agvs
+                curr_avg_st = state.trackers.average_service_time
+                return reward - n_charging_agvs_ratio - (curr_avg_st / 600)
+
+            elif self.reward_setting == 25:
+                # go charging reward
+                reward = 0
+                free_cs = self.f_get_free_cs_available(state)
+                total_queue = state.trackers.n_queued_delivery_orders + state.trackers.n_queued_retrieval_orders
+                if total_queue == 0 and action == 1:
+                    reward += 1
+                if free_cs and action == 1:
+                    reward += 1
+                elif not free_cs and action == 1:
+                    reward -= 1
+                n_charging_agvs_ratio = state.agv_manager.get_n_depleted_agvs() / state.agv_manager.n_agvs
+                curr_avg_st = state.trackers.average_service_time
+                # interrupt reward
+                cs_queue = state.agv_manager.queued_charging_events
+                interrupt_reward = 0
+                if interrupt_action < 0:
+                    # dont interrupt if many free agvs
+                    interrupt_reward = state.agv_manager.n_free_agvs / state.agv_manager.n_agvs
+                if interrupt_action >= 0:
+                    cs = state.agv_manager.charging_stations[interrupt_action]
+                    interrupted_agv_id = state.interrupted_agv
+                    interrupted_agv = state.agv_manager.agv_index[interrupted_agv_id]
+                    battery = interrupted_agv.battery
+                    # agv_battery = cs_queue[cs][0].check_battery_charge(state)
+                    n_free_agv = state.agv_manager.n_free_agvs - 1
+                    if n_free_agv > 0:
+                        interrupt_reward = 1 / n_free_agv
+                    else:
+                        interrupt_reward = 1
+
+                    interrupt_reward += battery / 100
+
+                return reward + interrupt_reward - n_charging_agvs_ratio - (total_queue / 350)# - (curr_avg_st / 600)
+
+            elif self.reward_setting == 26:
+                working_battery = state.agv_manager.get_average_agv_battery_working() / 100
+                free_battery = state.agv_manager.get_average_agv_battery_free() / 100
+                try:
+                    assert working_battery >= 0
+                except:
+                    print(f"reward error: {working_battery}")
+                return working_battery + free_battery
 
 
         else:

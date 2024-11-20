@@ -388,7 +388,9 @@ class SlapEnv(gym.Env):
             if isinstance(self.__core.inpt.params.charging_thresholds, list):
                 # combined go charging and charging duration decision
                 n_thresholds = len(self.__core.inpt.params.charging_thresholds)
-                self.action_space = gym.spaces.Discrete(n_thresholds)
+                n_cs = self.core_env.state.agv_manager.n_charging_stations
+                # self.action_space = gym.spaces.Discrete(n_thresholds)
+                self.action_space = gym.spaces.MultiDiscrete([n_thresholds, n_cs+1])
             else:
                 # Go to charging -> binary decision
                 self.action_space = gym.spaces.discrete.Discrete(2)
@@ -585,6 +587,45 @@ class SlapEnv(gym.Env):
         agv = state.agv_manager.agv_index[agv_id]
         battery_level = agv.battery
         charging_thresholds = np.array(state.params.charging_thresholds)
+        n_cs = state.agv_manager.n_charging_stations
+        if isinstance(self.action_space, gym.spaces.multi_discrete.MultiDiscrete):
+            # First dimension mask
+            mask = charging_thresholds > battery_level
+            if battery_level <= 20:
+                mask[0] = False
+            else:
+                mask[0] = True
+
+            # Second dimension mask
+            cs_mask = np.zeros([n_cs + 1])
+            cs_mask[0] = 1
+
+            for cs_idx, cs in enumerate(state.agv_manager.queued_charging_events):
+                if state.agv_manager.queued_charging_events[cs]:
+                    e = state.agv_manager.queued_charging_events[cs][0]
+                    agv_id = e.agv_id
+                    agv = state.agv_manager.agv_index[agv_id]
+                    target_battery = e.check_battery_charge(state)
+                    if target_battery > 30:
+                        cs_mask[cs_idx + 1] = 1
+
+            # if cs_mask.sum() > 1:
+            #     cs_mask[0] = 0
+
+            # Create a single flat array of the correct size
+            total_mask = np.ones(sum(self.action_space.nvec), dtype=np.bool8)
+
+            # Fill in the mask values at the correct positions
+            start_idx = 0
+            for dim_idx, dim_size in enumerate(self.action_space.nvec):
+                if dim_idx == 0:
+                    total_mask[start_idx:start_idx + dim_size] = mask
+                else:
+                    total_mask[start_idx:start_idx + dim_size] = cs_mask
+                start_idx += dim_size
+
+            return total_mask
+
         if self.action_space.n == 2 and state.params.charging_thresholds[1] == 100:
             mask = [1, 1]
             if battery_level < 20:

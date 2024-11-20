@@ -1014,7 +1014,9 @@ class Charging(Event):
         agvm = state.agv_manager
         agv = agvm.agv_index[self.agv_id]
         elapsed_time = state.time - self.start_time
-        battery_increase = elapsed_time * agvm.charging_rate
+        battery_increase = 0
+        if elapsed_time > 0:
+            battery_increase = elapsed_time * agvm.charging_rate
         return agv.battery + battery_increase
 
     def forced_handle(self, state: 'State', target_battery: int):

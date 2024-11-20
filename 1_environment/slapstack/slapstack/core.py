@@ -349,6 +349,20 @@ class SlapCore(gym.Env):
                        " order: " + str(self.legal_actions))
         return False
 
+    def interrupt_charging_test(self, action: int):
+        s = self.state
+        agvm = s.agv_manager
+        cs = list(agvm.queued_charging_events.keys())[action]
+        charging_event = agvm.queued_charging_events[cs][0]
+        target_battery = charging_event.check_battery_charge(s)
+        travel, next_charging_event = charging_event.forced_handle(s, target_battery)
+        charging_event.intercepted = True
+        self.events.add_travel_event(travel)
+        self.state.interrupted_agv = charging_event.agv_id
+        if next_charging_event:
+            assert next_charging_event.start_time == s.time
+            self.events.push_charging_event(next_charging_event)
+
     def interrupt_charging(self):
         s = self.state
         agvm = s.agv_manager
@@ -366,9 +380,6 @@ class SlapCore(gym.Env):
                     charging_event.intercepted = True
                     self.events.add_travel_event(travel)
                     if next_charging_event:
-                        # if next_charging_event.start_time > s.time:
-                        #     next_charging_event.start_time = s.time
-                        #     next_charging_event.time = s.time + next_charging_event.charging_duration
                         assert next_charging_event.start_time == s.time
                         self.events.push_charging_event(next_charging_event)
                     return True
@@ -480,6 +491,13 @@ class SlapCore(gym.Env):
         elif self.decision_mode == "charging":
             event = self.__create_event_on_cs_arrival(raw_action)
         elif self.decision_mode == "charging_check":
+            if raw_action.shape[0] == 2:
+                raw_action, interrupt_action = raw_action
+                interrupt_action -= 1
+                if interrupt_action >= 0:
+                    self.interrupt_charging_test(interrupt_action)
+                else:
+                    self.state.interrupted_agv = None
             event = self.__create_event_on_charging_check(raw_action)
         if isinstance(event, Travel):
             self.state.add_travel_event(event)

@@ -291,6 +291,7 @@ class State:
         self.current_source_sink = 0
         self.current_sku = None
         self.current_agv = None
+        self.interrupted_agv = None
         self.order_arrival_time = None
         # debugging information
         self.incomplete_orders = {}
