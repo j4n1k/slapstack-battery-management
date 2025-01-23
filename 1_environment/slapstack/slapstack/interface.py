@@ -40,6 +40,7 @@ class SlapEnv(gym.Env):
             init_partition = None
         self.__env_input = Input(environment_parameters, init_seed, init_partition)
         self.__core = SlapCore(deepcopy(self.__env_input), logger)
+        self.max_episode_steps = len(self.env_input.params.order_list)
         self.__core.reset(None)
         self.__output_converter = state_converter
         if state_converter:
@@ -56,6 +57,11 @@ class SlapEnv(gym.Env):
         self.__get_action_space()
         self.__get_observation_space()
         self.done_during_init = False
+        # Reward shaping
+        self.last_reward = None
+        self.last_action_taken = None
+        self.last_potential = None  # To store Φ(s) of the last state
+        self.gamma = 0.99
         if self.autoplay():
             _, _, done = self.__skip_fixed_decisions(False)
             if done:
@@ -121,12 +127,28 @@ class SlapEnv(gym.Env):
         legal_actions = self.get_legal_actions()
         state_repr = self.__output_converter.modify_state(self.__core.state)
         reward = self.__output_converter.calculate_reward(self.__core.state, action, legal_actions,
-                                                          decision_mode)
+                                                          decision_mode, agv_id=state.current_agv)
         self.last_reward = reward
+        # if self.__output_converter.reward_setting == 0:
+        if done:
+            reward = - state.trackers.average_service_time
         # self.__update_strategies(direct_action)
         if self.autoplay() and not done:
             # state_repr, reward, done = self.__skip_fixed_decisions(done)
             state_repr, _, done = self.__skip_fixed_decisions(done)
+        # if (self.core_env.state.trackers.n_queued_delivery_orders > 240
+        #         or self.core_env.state.trackers.n_queued_retrieval_orders > 330):
+        #     done = True
+        #     reward = - len(self.core_env.state.incomplete_orders)
+        # if self.core_env.events.all_orders_complete():
+            # if - state.trackers.average_service_time > self.__output_converter.kpi_last_episode:
+            #     reward = 10
+            # elif - state.trackers.average_service_time < self.__output_converter.kpi_last_episode:
+            #     reward = -10
+            # else:
+            #     reward = 0
+            # self.__output_converter.kpi_last_episode = - state.trackers.average_service_time
+            # reward = - state.trackers.average_service_time
         return state_repr, reward, done, False, {}
 
     def test_sameSKU(self):
@@ -188,6 +210,7 @@ class SlapEnv(gym.Env):
     def reset(self, seed=None, options=None):
         # self.__core = SlapCore(self.__env_input)
         # seed cycling if seeds were passed
+        self.last_potential = None
         if ((bool(self.__seeds_remaining) or bool(self.__seeds_used)) or
                 (bool(self.__partitions_remaining) or bool(self.__partitions_used))):
             if len(self.__seeds_remaining) > 0:
@@ -276,6 +299,14 @@ class SlapEnv(gym.Env):
             #     assert state_repr.shape == (900, )
         if self.__core.decision_mode == "charging" or self.__core.decision_mode == "charging_check":
             self.current_state_repr = state_repr
+            window_end = self.__core.state.time + 3600
+            orders_next_hour = 0
+            for order_time in self.core_env.events.order_times:
+                if order_time >= window_end:
+                    break
+                if self.__core.state.time <= order_time <= window_end:
+                    orders_next_hour += 1
+            self.__core.state.orders_next_hour = orders_next_hour
             # self.core_env.state.current_agv = self.core_env.previous_event.agv.id
         return state_repr, reward, done
 
@@ -389,8 +420,8 @@ class SlapEnv(gym.Env):
                 # combined go charging and charging duration decision
                 n_thresholds = len(self.__core.inpt.params.charging_thresholds)
                 n_cs = self.core_env.state.agv_manager.n_charging_stations
-                # self.action_space = gym.spaces.Discrete(n_thresholds)
-                self.action_space = gym.spaces.MultiDiscrete([n_thresholds, n_cs+1])
+                self.action_space = gym.spaces.Discrete(n_thresholds)
+                # self.action_space = gym.spaces.MultiDiscrete([n_thresholds, n_cs+1])
             else:
                 # Go to charging -> binary decision
                 self.action_space = gym.spaces.discrete.Discrete(2)
@@ -627,11 +658,10 @@ class SlapEnv(gym.Env):
             return total_mask
 
         if self.action_space.n == 2 and state.params.charging_thresholds[1] == 100:
-            mask = [1, 1]
+            mask = np.array([True, True])
             if battery_level < 20:
-                # If battery level is below 20%, action 0 (Don't charge) is invalid
-                mask[0] = 0
-            return np.array(mask)
+                mask[0] = False
+            return mask
         else:
             mask = charging_thresholds > battery_level
             if battery_level <= 20:

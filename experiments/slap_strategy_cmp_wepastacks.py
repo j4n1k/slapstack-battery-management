@@ -4,7 +4,7 @@ from experiment_commons import run_episode
 from slapstack.interface_templates import SimulationParameters
 from slapstack_controls.storage_policies import (ClassBasedPopularity,
                                                  ClassBasedCycleTime,
-                                                 ClosestOpenLocation)
+                                                 ClosestOpenLocation, ConstantTimeGreedyPolicy)
 
 
 def get_storage_strategies(nr_zones: List[int]):
@@ -47,21 +47,23 @@ params = SimulationParameters(
     generate_orders=False,
     verbose=False,
     resetting=False,
-    initial_pallets_storage_strategy=ClassBasedPopularity(
-        retrieval_orders_only=False,
-        future_counts=True,
-        init=True,
-        # n_zones changes dynamically based on the slap strategy
-        # in get_episode_env
-        n_zones=2
-    ),
+    # initial_pallets_storage_strategy=ClassBasedPopularity(
+    #     retrieval_orders_only=False,
+    #     future_counts=True,
+    #     init=True,
+    #     # n_zones changes dynamically based on the slap strategy
+    #     # in get_episode_env
+    #     n_zones=2
+    # ),
+    initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
     pure_lanes=True,
     n_levels=3,
     # https://logisticsinside.eu/speed-of-warehouse-trucks/
     agv_speed=2,
     unit_distance=1.4,
     pallet_shift_penalty_factor=20,  # in seconds
-    compute_feature_trackers=True
+    compute_feature_trackers=True,
+    battery_capacity=520000
 )
 
 if __name__ == '__main__':
@@ -70,7 +72,9 @@ if __name__ == '__main__':
         run_episode(simulation_parameters=params,
                     storage_strategy=storage_policies[i],
                     print_freq=1000, warm_start=True,
-                    log_dir='./result_data_wepa/')
+                    log_dir='./result_data_wepa/',
+                    charging_strategy=None,
+                    charging_check_strategy=None)
 
     # parallelize_heterogeneously(
     #     [run_episode] * n_strategies,

@@ -1,7 +1,7 @@
 from experiments.experiment_commons import run_episode
 # from slapstack.helpers import parallelize_heterogeneously
 from slapstack.interface_templates import SimulationParameters
-from slapstack_controls.charging_policies import FixedChargePolicy, LowTHChargePolicy
+from slapstack_controls.charging_policies import FixedChargePolicy, LowTHChargePolicy, OpportunityChargePolicy
 from slapstack_controls.storage_policies import ClosestOpenLocation
 # from slapstack_controls.storage_policies import OriginalShortestLeg
 from slapstack_controls.storage_policies import RandomOpenLocation
@@ -26,7 +26,7 @@ params = SimulationParameters(
     use_case="crossstacks",
     use_case_n_partitions=1,
     use_case_partition_to_use=0,
-    n_agvs=3,
+    n_agvs=7,
     generate_orders=False,
     verbose=False,
     resetting=False,
@@ -43,7 +43,7 @@ params = SimulationParameters(
     # update_partial_paths=False,
     agv_forks=1,
     charging_thresholds=[40, 50, 60, 70, 80],
-    battery_capacity=80000
+    battery_capacity=52
 )
 
 if __name__ == '__main__':
@@ -51,14 +51,14 @@ if __name__ == '__main__':
     storage_policies = get_storage_strategies()
     n_strategies = len(storage_policies)
     constraints_breached = True
-    n_agv = 6
+    n_agv = 7
     while constraints_breached:
         n_agv += 1
         params.n_agvs = n_agv
         constraints_breached = run_episode(
             simulation_parameters=params,
-            storage_strategy=ClosestOpenLocation(very_greedy=False),
-            charging_strategy=FixedChargePolicy(70),
+            storage_strategy=ClosestToDestination(),
+            charging_strategy=FixedChargePolicy(100),
             charging_check_strategy=LowTHChargePolicy(20),
             print_freq=1000,
             stop_condition=True,

@@ -92,6 +92,7 @@ class SlapCore(gym.Env):
             first value in state_stack
         logger: Logger
         """
+        self.interrupt_data = []
         self.interrupt_charging_mode = usr_inpt.params.interrupt_charging_mode
         self.charge_during_breaks = usr_inpt.params.charge_during_breaks
         self.inpt = usr_inpt
@@ -155,6 +156,7 @@ class SlapCore(gym.Env):
 
         def random_sku():
             return int(SlapCore.rng.integers(1, self.orders.n_SKUs + 1))
+
         # random_sku = lambda: random.randint(1, self.n_SKUs)
 
         # make a copy of SKU_counts because the self variable will be used
@@ -223,7 +225,7 @@ class SlapCore(gym.Env):
         """
         sku = random_sku()
         self.events.add_future_event(
-                      Delivery(sim_time, sku, i, self.verbose, source))
+            Delivery(sim_time, sku, i, self.verbose, source))
         sku_counts[sku] += 1
 
     def create_retrieval_order(self, sku_counts: dict, i: int, sim_time: int,
@@ -324,16 +326,27 @@ class SlapCore(gym.Env):
                     next_event = e.pop_queued_event(s)
                     break
                 else:
-                    # interrupted = self.interrupt_charging()
-                    interrupted = False
+                    if s.agv_manager.get_n_depleted_agvs() > 0:
+                        s.not_served += 1
+                    if self.state.params.interrupt_charging_mode:
+                        interrupted = self.interrupt_charging()
+                    else:
+                        interrupted = False
                     if interrupted:
                         continue
                     else:
                         break
 
             if next_event is None:
+                t = self.state.trackers
                 if not e.running:
                     return True
+                # elif (t.n_queued_delivery_orders > 240
+                #       or t.n_queued_retrieval_orders > 330
+                #         or self.state.agv_manager.get_n_depleted_agvs() == self.state.agv_manager.n_agvs
+                #             # or t.average_service_time > 1500
+                #       ):
+                #     return True
                 next_event = e.pop_future_event()
             action_needed = self.handle_event_and_update_env(next_event)
             sc.invalidate_sku_location_cache()
@@ -378,6 +391,9 @@ class SlapCore(gym.Env):
                 if target_battery >= 50:
                     travel, next_charging_event = charging_event.forced_handle(s, target_battery)
                     charging_event.intercepted = True
+                    vector = [s.time, charging_event.charging_check_time, charging_event.start_time,
+                              charging_event.agv_id, charging_event.check_time_elapsed(s), target_battery]
+                    self.interrupt_data.append(vector)
                     self.events.add_travel_event(travel)
                     if next_charging_event:
                         assert next_charging_event.start_time == s.time
@@ -430,7 +446,7 @@ class SlapCore(gym.Env):
             (storage/retrieval decisions)
         """
         # if isinstance(next_event, Charging):
-            # print()
+        # print()
         if next_event in self.events.current_travel:
             # noinspection PyTypeChecker
             next_event: Travel
@@ -446,10 +462,10 @@ class SlapCore(gym.Env):
         #     self.state.time = next_event.time
         # handle event and see if an action is needed and what data
         # structures should the next (or same) event be added to
-        if isinstance(next_event, DeliverySecondLeg) or\
-                isinstance(next_event, RetrievalSecondLeg)\
+        if isinstance(next_event, DeliverySecondLeg) or \
+                isinstance(next_event, RetrievalSecondLeg) \
                 or isinstance(next_event, Delivery):
-            event_queueing_info: EventHandleInfo =\
+            event_queueing_info: EventHandleInfo = \
                 next_event.handle(self.state, self)
         else:
             event_queueing_info: EventHandleInfo = next_event.handle(self.state)
@@ -491,7 +507,7 @@ class SlapCore(gym.Env):
         elif self.decision_mode == "charging":
             event = self.__create_event_on_cs_arrival(raw_action)
         elif self.decision_mode == "charging_check":
-            if raw_action.shape[0] == 2:
+            if isinstance(raw_action, list):
                 raw_action, interrupt_action = raw_action
                 interrupt_action -= 1
                 if interrupt_action >= 0:
@@ -505,6 +521,8 @@ class SlapCore(gym.Env):
         else:
             self.events.add_future_event(event)
         self.logger.log_state()
+        if hasattr(self.previous_event, "agv_id"):
+            self.state.previous_agv = self.previous_event.agv_id
         done_prematurely = self.step_no_action()
         if hasattr(self.previous_event, "agv_id"):
             self.state.current_agv = self.previous_event.agv_id
@@ -518,6 +536,7 @@ class SlapCore(gym.Env):
         # assert sc.n_visible_agvs == sc.n_agvs - 1
         if self.events.all_orders_complete():
             self.state.done = True
+            print(f"Avg ST: {self.state.trackers.average_service_time}")
             return self.state, True  # sim done
         elif done_prematurely:
             print("WARNING: Simulation ended due to an overfull warehouse or "
@@ -534,9 +553,9 @@ class SlapCore(gym.Env):
         state_cache_sink = self.state.location_manager.sink_location
         self.state.location_manager.sink_location = None
         retrieval_order: Retrieval = None
-        if state_cache_sink and\
+        if state_cache_sink and \
                 unravel(state_cache_sink,
-                          self.state.location_manager.S.shape) == action:
+                        self.state.location_manager.S.shape) == action:
             agv: AGV = self.state.agv_manager.agv_index[prev_e.agv_id]
             found_in_dcc_orders = False
             for ret_dcc_order in agv.dcc_retrieval_order:
@@ -585,7 +604,7 @@ class SlapCore(gym.Env):
             if len(self.events.queued_delivery_orders[previous_sku]) == 0:
                 del self.events.queued_delivery_orders[previous_sku]
 
-        if len(agv.dcc_retrieval_order) == 0 and agv.forks > 1 and\
+        if len(agv.dcc_retrieval_order) == 0 and agv.forks > 1 and \
                 agv.available_forks < agv.forks - 1:
             travel_event: RetrievalFirstLeg = self.events.find_travel_event(
                 agv.id, RetrievalFirstLeg)
@@ -627,11 +646,12 @@ class SlapCore(gym.Env):
         if queue:
             current_charge_event = queue[-1]
             possible_start = current_charge_event.time
-
+        # if prev_e.agv.battery < 20:
+        #     print(prev_e.agv.battery)
         charging_event = Charging(possible_start, charging_event_travel=prev_e,
-                                  charging_duration=action)
+                                  charging_duration=action, charging_check_time = prev_e.charging_check_time)
         queue.append(charging_event)
-        assert booked_cs[prev_e.last_node][0].id == queue[0].agv_id
+        #        assert booked_cs[prev_e.last_node][0].id == queue[0].agv_id
         #if prev_e.last_node in booked_cs:
         if len(booked_cs[prev_e.last_node]) > 1:
             # cs is queued (one agv currently charging and at least one in queue)
@@ -647,14 +667,16 @@ class SlapCore(gym.Env):
                                          action: int):
         prev_e = self.previous_event
         travel_event = None
-        if action != 0:
+        if action != 0 or prev_e.agv.battery < 20:
             #agv: AGV = self.state.agv_manager.agv_index[prev_e.agv_id]
             agv = prev_e.agv
+            agv.charging_needed = True
+            self.state.agv_manager.n_charging_agvs += 1
             agv.scheduled_charging = False
             cs = self.state.agv_manager.get_charging_station(agv.position, None)
             d = self.state.agv_manager.router.get_distance(agv.position, cs)
             t = (d * self.state.agv_manager.router.unit_distance
-                             / self.state.agv_manager.router.speed)
+                 / self.state.agv_manager.router.speed)
             depleted_unitl_cs = self.state.agv_manager.consumption_rate_unloaded * t
             to_add = depleted_unitl_cs / self.state.agv_manager.charging_rate
             ChargingFirstLeg.charging_nr += 1
@@ -674,7 +696,8 @@ class SlapCore(gym.Env):
                 order=dummy_charging_order,
                 agv_id=agv.id,
                 core=self.events,
-                fixed_charging_duration=fixed_charging_duration)
+                fixed_charging_duration=fixed_charging_duration,
+                charging_check_time=prev_e.time)
         elif action == 0:
             agv = prev_e.agv
             self.state.agv_manager.release_agv(prev_e.last_node, self.state.time, agv.id)
@@ -722,7 +745,7 @@ class SlapCore(gym.Env):
                 self.previous_event = this_event
                 self.SKU_counts[this_event.SKU] -= 1
                 self.print("SKU counts: " + str(self.SKU_counts))
-        if isinstance(this_event, ChargingFirstLeg): #and this_event.charging (Wozu war das?)
+        if isinstance(this_event, ChargingFirstLeg):  #and this_event.charging (Wozu war das?)
             assert this_event.charging
             self.decision_mode = "charging"
             self.state.decision_mode = "charging"
@@ -730,6 +753,17 @@ class SlapCore(gym.Env):
         if isinstance(this_event, GoChargingCheck):
             self.decision_mode = "charging_check"
             self.previous_event = this_event
+            # if self.events.running:
+            #     self.state.next_e = self.events.running[0]
+            # else:
+            #     self.state.next_e = None
+            for e in self.events.running:
+                if isinstance(e, Delivery) or isinstance(e, Retrieval):
+                    self.state.next_e = e
+                    break
+
+            # for e in self.events.running:
+            #     pass
 
     def process_travel_events(self, elapsed_time: float):
         """ if time has elapsed, update any currently active travel events"""
@@ -929,7 +963,7 @@ class SlapCore(gym.Env):
                 period = order[-1]
                 source_sink -= 1
             elif len(order) == 7:
-                order_type, sku, arrival_time, source_sink, destination, batch\
+                order_type, sku, arrival_time, source_sink, destination, batch \
                     = order[:-1]
                 period = order[-1]
                 source_sink -= 1
@@ -1104,6 +1138,7 @@ class SlapCore(gym.Env):
 class SlapOrders:
     """this class groups together inpt that have to do with skus, orders,
     initial, pallets"""
+
     def __init__(self, params: SimulationParameters,
                  n_storage_locations: int):
         """

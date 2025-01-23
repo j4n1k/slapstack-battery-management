@@ -7,13 +7,13 @@ wandb:
   project_name: "subproc-vec-test"
 
 env:
-  use_case: "wepastacks_bm"
-  n_partitions: 20
-  n_agvs: 40
+  use_case: "minislap"
+  n_partitions: 2
+  n_agvs: 1
   seed: null  # Set to integer for reproducibility
-  train_partitions: [37, 38, 39, 40, 41, 42, 44]  # Partitions to use in parallel
-  eval_partitions: [37, 38, 39, 40, 41, 42, 44]
-  charging_thresholds: [0, 30, 40, 50, 60, 70, 80]
+  train_partitions: [0]  # Partitions to use in parallel
+  eval_partitions: [0]
+  charging_thresholds: [0, 100]
   battery_capacity: 52
 
 training:
@@ -29,8 +29,8 @@ training:
   ent_coef: 0.01
 
 evaluation:
-  eval_freq: 40000
-  n_eval_episodes: 7  # Number of evaluation episodes
+  eval_freq: 20000
+  n_eval_episodes: 1  # Number of evaluation episodes
   deterministic: true
 
 logging:

@@ -13,22 +13,26 @@ import gymnasium as gym
 
 import wandb
 
-class WandbCallback(BaseCallback):
-    def __init__(self, verbose=0, log_interval=1):
+class CustomWandbCallback(BaseCallback):
+    def __init__(self, verbose=0, log_interval=1, reward_setting=1):
         super().__init__(verbose)
         self.log_interval = log_interval
+        self.reward_setting = reward_setting
 
     def _on_step(self):
         super()._on_step()
         try:
             training_env = self.model.get_env().envs[0].env.unwrapped.gym_env
         except AttributeError:
-            training_env = self.model.get_env().envs[0].env.unwrapped
+            training_env = self.model.get_env().get_attr('unwrapped')[0]
+            # training_env = self.model.get_env().envs[0].env.unwrapped
         action = training_env.last_action_taken
 
         log_dict = {}
         obs = training_env.current_state_repr
-        observation = obs.reshape((-1,) + self.model.observation_space.shape)
+        if len(obs.shape) == 2:
+            obs = obs[-1]
+        observation = obs.reshape((-1,) + obs.shape)
         observation = obs_as_tensor(observation, self.model.device)
         feature_list = training_env.feature_list
         log_dict.update({f"observations/{f}": observation[0][i].item() for i, f in enumerate(feature_list)})
@@ -50,9 +54,12 @@ class WandbCallback(BaseCallback):
         queue_per_station = {cs: 0 for cs in agvm.free_charging_stations}
         for cs in agvm.booked_charging_stations.keys():
             queue_per_station[cs] = len(agvm.booked_charging_stations[cs])
-
+        interrupt_action = 0
+        if isinstance(action, np.ndarray):
+            action, interrupt_action = action
         log_dict.update({
             "train/last_charging_action": action,
+            "train/last_interrupt_action": interrupt_action,
             "train/average_service_time": training_env.core_env.state.trackers.average_service_time,
             "train/n_retrieval_orders": training_env.core_env.state.trackers.n_queued_retrieval_orders,
             "train/n_delivery_orders": training_env.core_env.state.trackers.n_queued_delivery_orders,
@@ -60,9 +67,20 @@ class WandbCallback(BaseCallback):
             "train/utilization": training_env.core_env.state.agv_manager.get_average_utilization() /
                                  training_env.core_env.state.time if training_env.core_env.state.time != 0 else 0,
             "train/queued_charging_events": np.average(list(queue_per_station.values())),
-            "train/last_reward": training_env.last_reward,
         })
+        log_dict.update({
+            "reward/last_reward": training_env.last_reward})
+        if self.reward_setting == 24:
+            log_dict.update({
+                "reward/last_queue_zero_reward": training_env.core_env.state.last_queue_zero_reward,
+                "reward/last_free_cs_reward": training_env.core_env.state.last_free_cs_reward,
+                "reward/last_free_cs_penalty": training_env.core_env.state.last_free_cs_penalty,
+                "reward/last_no_amr_penalty": training_env.core_env.state.last_no_amr_penalty,
+                "reward/last_amr_ratio": training_env.core_env.state.last_amr_ratio,
+                "reward/last_st": training_env.core_env.state.last_st,
+                "reward/last_queue_ratio": training_env.core_env.state.last_queue_ratio,
 
+            })
         wandb.log(log_dict, step=self.num_timesteps)
 
         if isinstance(self.model, DQN) or isinstance(self.model, SAC):
@@ -83,7 +101,6 @@ class TensorBoardCallback(BaseCallback):
     def __init__(self, verbose, log_interval):
         super().__init__(verbose)
         self.log_interval = log_interval
-
     def _on_step(self):
         super()._on_step()
         training_env = self.model.get_env().envs[0].env.unwrapped.gym_env

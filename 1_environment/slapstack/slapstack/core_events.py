@@ -950,11 +950,13 @@ class ChargingFirstLeg(Travel):
     def __init__(self, state: 'State', start_point: Tuple[int, int],
                  end_point: Tuple[int, int], travel_type: str,
                  level: int, orders, order, agv_id: int, core,
-                 servicing_retrieval_order: Retrieval = None, fixed_charging_duration=None):
+                 servicing_retrieval_order: Retrieval = None, fixed_charging_duration=None,
+                 charging_check_time=None):
         super().__init__(state, start_point, end_point, travel_type,
                          level, orders, order,
                          TravelEventKeys.CHARGING_FIRST_LEG, agv_id)
         self.fixed_charging_duration = fixed_charging_duration
+        self.charging_check_time = charging_check_time
         if state.agv_manager.agv_index[agv_id].free:
             locs = state.agv_manager.get_agv_locations()
             # assert start_point in locs.keys()
@@ -971,8 +973,9 @@ class ChargingFirstLeg(Travel):
                 self.travel_type, core.events, charging_booking=True)
         else:
             self.agv = state.agv_manager.agv_index[agv_id]
-        self.agv.charging_needed = True
-        state.agv_manager.n_charging_agvs += 1
+        # self.agv.charging_needed = True
+        # state.agv_manager.n_charging_agvs += 1
+        state.agv_manager.log_travel_to_cs(self.last_node, self.agv)
         assert self.agv.battery > 10
         assert self.agv.free == False
         assert self.agv.id == agv_id
@@ -984,6 +987,7 @@ class ChargingFirstLeg(Travel):
             state.remove_travel_event(self.order.order_number)
         except KeyError:
             print("no travel")
+        state.agv_manager.release_travel_to_cs(self.last_node, self.agv)
         state.agv_manager.update_v_matrix(self.first_node, self.last_node, True)
         state.remove_route(self.route.get_indices())
         assert self.last_node in np.argwhere(state.agv_manager.router.s[
@@ -999,8 +1003,9 @@ class ChargingFirstLeg(Travel):
 
 class Charging(Event):
     def __init__(self, time: int, charging_event_travel: ChargingFirstLeg,
-                 charging_duration: int):
+                 charging_duration: int, charging_check_time=None):
         self.start_time = time
+        self.charging_check_time = charging_check_time
         end_time = time + charging_duration
         super().__init__(time=end_time, verbose=False)
         self.charging_event_travel = charging_event_travel
@@ -1010,10 +1015,13 @@ class Charging(Event):
         self.intercepted = False
         # TODO ensure AMRs don't overlap at charging station
 
+    def check_time_elapsed(self, state: 'State'):
+        return state.time - self.start_time
+
     def check_battery_charge(self, state: 'State'):
         agvm = state.agv_manager
         agv = agvm.agv_index[self.agv_id]
-        elapsed_time = state.time - self.start_time
+        elapsed_time = self.check_time_elapsed(state)
         battery_increase = 0
         if elapsed_time > 0:
             battery_increase = elapsed_time * agvm.charging_rate

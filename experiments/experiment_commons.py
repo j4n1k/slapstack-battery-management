@@ -246,10 +246,15 @@ class LoopControl:
         if (t.n_queued_delivery_orders > 240
                 or t.n_queued_retrieval_orders > 330):
             return True
+        # if (t.n_queued_delivery_orders > 627
+        #         or t.n_queued_retrieval_orders > 693
+        #         or t.average_service_time > 1800):
+        #     return True
         return False
 
 
 def _init_run_loop(simulation_parameters, storage_strategy, log_dir):
+    week = simulation_parameters.use_case_partition_to_use
     if hasattr(storage_strategy, 'n_zones'):
         environment: SlapEnv = get_episode_env(
             sim_parameters=simulation_parameters,
@@ -262,7 +267,7 @@ def _init_run_loop(simulation_parameters, storage_strategy, log_dir):
     loop_controls = LoopControl(environment)
     # state.state_cache.perform_sanity_check()
     environment.core_env.logger.set_logfile_name(
-        f'{storage_strategy.name}_n{simulation_parameters.n_agvs}')
+        f'pt_{week}_COL_nointerrupt_th100_n{simulation_parameters.n_agvs}_n{simulation_parameters.n_cs}')
     return environment, loop_controls
 
 

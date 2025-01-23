@@ -1,6 +1,7 @@
 from os.path import sep, abspath, join
 
 import hydra
+import torch
 from gymnasium.vector import AsyncVectorEnv
 from omegaconf import DictConfig, OmegaConf
 import os
@@ -9,18 +10,22 @@ from typing import Dict
 
 import pandas as pd
 import numpy as np
+from sb3_contrib.common.maskable.evaluation import evaluate_policy
 from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
 from sb3_contrib.common.maskable.utils import get_action_masks
 
 from sb3_contrib.common.wrappers import ActionMasker
+from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
 from stable_baselines3 import DQN, SAC
-from sb3_contrib import MaskablePPO
+from sb3_contrib import MaskablePPO, RecurrentPPO
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecNormalize, VecMonitor
+from torch import nn
+from torch.optim import Adam
 from torch.utils.tensorboard import SummaryWriter
 import wandb
 # from wandb.integration.sb3 import WandbCallback
-from custom_callbacks import WandbCallback, MaskableEvalCallback
+from custom_callbacks import CustomWandbCallback, MaskableEvalCallback
 
 from experiment_commons import (ExperimentLogger, LoopControl,
                                 create_output_str, count_charging_stations, delete_prec_dima, gen_charging_stations,
@@ -44,24 +49,12 @@ def get_env(sim_parameters: SimulationParameters,
         partitions = [None]
     seeds = [56513]
     if state_converter:
-        if ((cfg.task.task.name == "go_charging" or cfg.task.task.name == "combined")
-                and not cfg.model.agent.name == "Threshold"):
-            action_converters = [BatchFIFO(),
-                                 ClosestOpenLocation(very_greedy=False),
-                                 FixedChargePolicy(100)
-                                 ]
-            feature_list = cfg.experiment.feature_list
-            decision_mode = "charging_check"
-        else:
-            action_converters = [BatchFIFO(),
-                                 ClosestOpenLocation(very_greedy=False),
-                                 LowTHChargePolicy(20)
-                                 ]
-            feature_list = ["n_depleted_agvs", "avg_battery", "utilization",
-                 "queue_len_charging_station", "global_fill_level", "curr_agv_battery",
-                 "dist_to_cs", "queue_len_retrieval_orders", "queue_len_delivery_orders",
-                 "hour_sin", "hour_cos", "day_of_week"]
-            decision_mode = "charging_check"
+        action_converters = [BatchFIFO(),
+                             ClosestOpenLocation(very_greedy=False),
+                             FixedChargePolicy(100)
+                             ]
+        feature_list = cfg.experiment.feature_list
+        decision_mode = "charging_check"
         return SlapEnv(
             sim_parameters, seeds, partitions,
             logger=ExperimentLogger(
@@ -89,12 +82,13 @@ def get_env(sim_parameters: SimulationParameters,
 
 def _init_run_loop(simulation_parameters, name, log_dir, cfg, state_converter=True):
     pt = simulation_parameters.use_case_partition_to_use
+    logfile_name = f'pt_{pt}_COL_PPO_{cfg.task.task.reward_setting}_{str(simulation_parameters.interrupt_charging_mode)}'
     environment: SlapEnv = get_env(
         sim_parameters=simulation_parameters,
         log_frequency=1000, nr_zones=3, log_dir=log_dir,
         #logfile_name=f'{name}_th{name}'
-        logfile_name=f'', state_converter=state_converter, cfg=cfg)
-    loop_controls = LoopControl(environment, steps_per_episode=160)
+        logfile_name=logfile_name, state_converter=state_converter, cfg=cfg)
+    loop_controls = LoopControl(environment, steps_per_episode=None)
     return environment, loop_controls
 
 
@@ -104,7 +98,8 @@ def run_episode(simulation_parameters: SimulationParameters,
                 print_freq=0,
                 log_dir='',
                 writer=None,
-                state_converter=True):
+                state_converter=True,
+                stop_condition=False):
     name = cfg.model.agent.name
     #df_actions = pd.DataFrame(columns=["Step", "Action", "kpi__makespan"])
     df_actions = pd.DataFrame()
@@ -114,31 +109,35 @@ def run_episode(simulation_parameters: SimulationParameters,
     pt_idx = simulation_parameters.use_case_partition_to_use
     parametrization_failure = False
     start = time.time()
+    data = []
+    observations, _ = env.reset()
+
     while not loop_controls.done:
         if env.core_env.decision_mode == "charging":
             prev_event = env.core_env.previous_event
-            state_repr = env.current_state_repr
+            # observations = env.current_state_repr
             if isinstance(model, ChargingPolicy):
                 action = model.get_action(loop_controls.state,
                                                       agv_id=prev_event.agv_id)
             else:
-                action, state = model.predict(state_repr,
+                action, state = model.predict(observations,
                                               deterministic=True)
         elif env.core_env.decision_mode == "charging_check":
             prev_event = env.core_env.previous_event
-            state_repr = env.current_state_repr
+            # observations = env.current_state_repr
             if isinstance(model, MaskablePPO):
                 action_masks = get_action_masks(env)
-                action, _states = model.predict(state_repr,
+                action, _states = model.predict(observations,
                                                 action_masks=action_masks,
                                                 deterministic=True)
+                data.append({"step": loop_controls.n_decisions, "features": observations, "action": action})
             else:
-                action = model.predict(state_repr,
+                action = model.predict(observations,
                                        deterministic=True)
             # action = action[0].item()
         else:
             raise ValueError
-        output, reward, loop_controls.done, info, _ = env.step(action.item())
+        observations, reward, loop_controls.done, info, _ = env.step(action.item())
         if print_freq and loop_controls.n_decisions % print_freq == 0:
             ExperimentLogger.print_episode_info(
                 name, start, loop_controls.n_decisions,
@@ -159,37 +158,42 @@ def run_episode(simulation_parameters: SimulationParameters,
             "n_queued_retrieval_orders": [s.trackers.n_queued_retrieval_orders],
             "n_depleted_agvs": [am.get_n_depleted_agvs()]
         })
-        writer.add_scalar(f'Evaluation/{pt_idx}/Makespan', s.time, pt_idx)
-        writer.add_scalar(f'Evaluation/{pt_idx}/Servicetime', s.trackers.average_service_time, pt_idx)
-        writer.add_scalar(f'Evaluation/{pt_idx}/Avg_Battery_Level', am.get_average_agv_battery(), pt_idx)
-        writer.add_scalar(f'Evaluation/{pt_idx}/N_Charging_Events', sum(len(lst) for lst in am.queued_charging_events.values()), pt_idx)
-        writer.add_scalar(f'Evaluation/{pt_idx}/N_Retrieval_Orders', s.trackers.n_queued_retrieval_orders, pt_idx)
-        writer.add_scalar(f'Evaluation/{pt_idx}/N_Depleted_AGV', am.get_n_depleted_agvs(), pt_idx)
-        action = action.item()
-        # if isinstance(model, SAC):
-        #     action = action.item()
-        # elif isinstance(model, DQN):
-        #     action = cfg.task.task.charging_thresholds[action[0].item()]
-        # else:
-        #     action = cfg.model.agent.model_params.threshold
-        writer.add_scalar(f'Evaluation/{pt_idx}/Action', action)
+        if writer:
+            writer.add_scalar(f'Evaluation/{pt_idx}/Makespan', s.time, pt_idx)
+            writer.add_scalar(f'Evaluation/{pt_idx}/Servicetime', s.trackers.average_service_time, pt_idx)
+            writer.add_scalar(f'Evaluation/{pt_idx}/Avg_Battery_Level', am.get_average_agv_battery(), pt_idx)
+            writer.add_scalar(f'Evaluation/{pt_idx}/N_Charging_Events', sum(len(lst) for lst in am.queued_charging_events.values()), pt_idx)
+            writer.add_scalar(f'Evaluation/{pt_idx}/N_Retrieval_Orders', s.trackers.n_queued_retrieval_orders, pt_idx)
+            writer.add_scalar(f'Evaluation/{pt_idx}/N_Depleted_AGV', am.get_n_depleted_agvs(), pt_idx)
+            action = action.item()
+            writer.add_scalar(f'Evaluation/{pt_idx}/Action', action)
 
         df_actions = pd.concat([df_actions, action_taken])
         if loop_controls.pbar is not None:
             loop_controls.pbar.update(1)
+        if not loop_controls.done and stop_condition:
+            # will set the done control to true is stop criteria is met
+            loop_controls.done = loop_controls.stop_prematurely()
+            if loop_controls.done:
+                parametrization_failure = True
+                env.core_env.logger.write_logs()
         if loop_controls.done:
-            parametrization_failure = True
             env.core_env.logger.write_logs()
     ExperimentLogger.print_episode_info(
         name, start, loop_controls.n_decisions,
         loop_controls.state)
-    df_actions.to_csv(log_dir + f'/pt_{pt_idx}_th{name}_actions.csv')
+    data_np = np.stack([obs['features'] for obs in data])
+    data_pd = pd.DataFrame(data_np, columns=cfg.experiment.feature_list)
+    actions = np.stack([obs["action"] for obs in data])
+    data_pd = pd.concat([data_pd, pd.DataFrame(actions,
+                                               columns=["action"])], axis=1)
+    # data_pd.to_csv(log_dir + f"/data_day{pt_idx}.csv")
+    # df_actions.to_csv(log_dir + f'/pt_{pt_idx}_th{name}_actions.csv')
     return parametrization_failure, df_actions
 
 
-def run_evaluation_tensorboard(cfg, model, storage_strategy, state_converter=True):
-    writer = SummaryWriter(log_dir=cfg.experiment.log_dir)
-    n_partitions = cfg.sim_params.use_case_n_partitions
+def run_evaluation_agv(cfg, model, storage_strategy, state_converter=True):
+    # writer = SummaryWriter(log_dir=cfg.experiment.log_dir)
     e_partitions = cfg.evaluation.eval_partitions
     reward = 0
     for pt_idx in e_partitions:
@@ -212,7 +216,64 @@ def run_evaluation_tensorboard(cfg, model, storage_strategy, state_converter=Tru
             n_levels=cfg.sim_params.n_levels,
             charging_thresholds=list(cfg.task.task.charging_thresholds),
             charge_during_breaks=cfg.sim_params.charge_during_breaks,
-            battery_capacity=cfg.sim_params.battery_capacity
+            battery_capacity=cfg.sim_params.battery_capacity,
+            interrupt_charging_mode=cfg.sim_params.interrupt_charging_mode
+
+        )
+
+        parametrization_failure = True
+        while parametrization_failure:
+            params.n_agvs += 1
+            parametrization_failure, episode_results = run_episode(
+                simulation_parameters=params,
+                cfg=cfg,
+                model=model,
+                print_freq=1000,
+                log_dir=cfg.experiment.log_dir,
+                writer=None,
+                state_converter=state_converter,
+                stop_condition=True
+            )
+
+        # Log scalar values
+        # writer.add_scalar('Evaluation/Total_Reward', episode_results['kpi__makespan'].iloc[-1], pt_idx)
+        #writer.add_scalar('Evaluation/Episode_Length', episode_results['episode_length'], pt_idx)
+        # writer.add_scalar('Evaluation/Avg_Battery_Level', episode_results['avg_battery_level'], pt_idx)
+        # writer.add_scalar('Evaluation/N_Charging_Events', episode_results['n_queued_charging_events'], pt_idx)
+        # writer.add_scalar('Evaluation/N_Retrieval_Orders', episode_results['n_queued_retrieval_orders'], pt_idx)
+
+        # Log action distribution
+        # reward += episode_results["kpi__average_service_time"]
+
+    return reward / len(e_partitions)
+
+def run_evaluation(cfg, model, storage_strategy, state_converter=True):
+    writer = SummaryWriter(log_dir=cfg.experiment.log_dir)
+    e_partitions = cfg.evaluation.eval_partitions
+    reward = 0
+    for pt_idx in e_partitions:
+        params = SimulationParameters(
+            use_case=cfg.sim_params.use_case,
+            use_case_n_partitions=cfg.sim_params.use_case_n_partitions,
+            # use_case_n_partitions=1,
+            use_case_partition_to_use=pt_idx,
+            partition_by_week=cfg.sim_params.partition_by_week,
+            partition_by_day=cfg.sim_params.partition_by_day,
+            n_agvs=cfg.sim_params.n_agvs,
+            generate_orders=cfg.sim_params.generate_orders,
+            verbose=cfg.sim_params.verbose,
+            resetting=cfg.sim_params.resetting,
+            initial_pallets_storage_strategy=storage_strategy,
+            pure_lanes=cfg.sim_params.pure_lanes,
+            agv_speed=cfg.sim_params.agv_speed,
+            unit_distance=cfg.sim_params.unit_distance,
+            pallet_shift_penalty_factor=cfg.sim_params.pallet_shift_penalty_factor,
+            compute_feature_trackers=cfg.sim_params.compute_feature_trackers,
+            n_levels=cfg.sim_params.n_levels,
+            charging_thresholds=list(cfg.task.task.charging_thresholds),
+            charge_during_breaks=cfg.sim_params.charge_during_breaks,
+            battery_capacity=cfg.sim_params.battery_capacity,
+            interrupt_charging_mode=cfg.sim_params.interrupt_charging_mode
         )
 
         parametrization_failure, episode_results = run_episode(
@@ -233,8 +294,6 @@ def run_evaluation_tensorboard(cfg, model, storage_strategy, state_converter=Tru
         # writer.add_scalar('Evaluation/N_Retrieval_Orders', episode_results['n_queued_retrieval_orders'], pt_idx)
 
         # Log action distribution
-        action_counts = np.bincount(episode_results['Action'])
-        writer.add_histogram('Evaluation/Action_Distribution', action_counts, pt_idx)
         # reward += episode_results["kpi__average_service_time"]
 
     writer.close()
@@ -268,6 +327,7 @@ def make_env(sim_params, log_frequency, nr_zones, logfile_name, log_dir, partiti
             reward_setting=reward_setting,
             cfg=cfg
         )
+        # env = Monitor(env)
         env = ActionMasker(env, mask_fn)
         return env
     return _init
@@ -333,10 +393,11 @@ def main(cfg: DictConfig):
         n_levels=cfg.sim_params.n_levels,
         charging_thresholds=th,
         charge_during_breaks=cfg.sim_params.charge_during_breaks,
-        battery_capacity=cfg.sim_params.battery_capacity
+        battery_capacity=cfg.sim_params.battery_capacity,
+        interrupt_charging_mode=cfg.sim_params.interrupt_charging_mode
+
     )
 
-    # Create environment
     env: SlapEnv = get_env(
         sim_parameters=sim_params,
         log_frequency=1000,
@@ -358,16 +419,19 @@ def main(cfg: DictConfig):
     #             reward_setting=cfg.task.task.reward_setting,
     #             partitions=cfg.experiment.t_pt,
     #             cfg=cfg
-    #         )
+    #         ) # for _ in range(8)
     #     ])
+
     # env = VecNormalize(
     #     env,
-    #     norm_obs=False,  # Normalize observations
-    #     norm_reward=False,  # Normalize rewards
+    #     norm_obs=True,  # Normalize observations
+    #     norm_reward=True,  # Normalize rewards
     #     clip_reward=10.0,  # Clip normalized rewards
     #     gamma=0.99,  # Discount factor
-    #     training=True  # Update reward normalization statistics during training
+    #     training=True,  # Update reward normalization statistics during training,
+    #     norm_obs_keys=["travel_time_retrieval_avg", "average_distance", "utilization_time", "distance_retrieval_avg"]
     # )
+
     # env = VecMonitor(env)
 
     eval_env: SlapEnv = get_env(
@@ -376,10 +440,11 @@ def main(cfg: DictConfig):
         nr_zones=3,
         log_dir=cfg.experiment.log_dir,
         logfile_name=f"{cfg.model.agent.name}_{cfg.experiment.id}",
-        reward_setting=1,
+        reward_setting=cfg.task.task.reward_setting,
         partitions=cfg.experiment.e_pt,
         cfg=cfg
     )
+
     # eval_env = DummyVecEnv([
     #     make_env(
     #         sim_params=sim_params,
@@ -388,17 +453,18 @@ def main(cfg: DictConfig):
     #         log_dir=cfg.experiment.log_dir,
     #         logfile_name=f"{cfg.model.agent.name}_{cfg.experiment.id}",
     #         reward_setting=1,
-    #         partitions=[cfg.experiment.e_pt],
+    #         partitions=cfg.experiment.e_pt,
     #         cfg=cfg
     #     )
     # ])
     # eval_env = VecNormalize(
     #     eval_env,
-    #     norm_obs=False,  # Normalize observations
+    #     norm_obs=True,  # Normalize observations
     #     norm_reward=False,  # Normalize rewards
     #     clip_reward=10.0,  # Clip normalized rewards
     #     gamma=0.99,  # Discount factor
-    #     training=False  # Update reward normalization statistics during training
+    #     training=False,  # Update reward normalization statistics during training
+    #     norm_obs_keys = ["travel_time_retrieval_avg", "average_distance", "utilization_time", "distance_retrieval_avg"]
     # )
     # eval_env = VecMonitor(eval_env)
 
@@ -406,17 +472,26 @@ def main(cfg: DictConfig):
     if cfg.model.agent.name == "PPO":
         env = ActionMasker(env, mask_fn)
         eval_env = ActionMasker(eval_env, mask_fn)
-        model = MaskablePPO(MaskableActorCriticPolicy, env,
+        model = MaskablePPO(
+                            MaskableActorCriticPolicy,
+                            env,
                             verbose=1,
                             tensorboard_log="./dqn_charging_tensorboard/",
-                            # ent_coef=cfg.model.agent.model_params.ent_coef,
-                            device="cpu")
-    elif cfg.model.agent.name == "Threshold":
-        model = FixedChargePolicy(charging_threshold=cfg.model.agent.model_params.threshold)
+                            device="cpu",
+                            )
+    elif cfg.model.agent.name == "DQN":
+        model = DQN("MlpPolicy", env, verbose=1, tensorboard_log="./dqn_charging_tensorboard/")
+    elif cfg.model.agent.name == "RecurrentPPO":
+        model = RecurrentPPO(
+        "MlpLstmPolicy",
+        env,
+        verbose=1,
+        tensorboard_log="./dqn_charging_tensorboard/",
+        ent_coef=0.001
+    )
     else:
         raise ValueError(f"Unknown model: {cfg.model.agent.name}")
 
-    # Set up callbacks
     if isinstance(env, ActionMasker):
         eval_callback = MaskableEvalCallback(
             eval_env,
@@ -444,11 +519,12 @@ def main(cfg: DictConfig):
         save_path=os.path.join(cfg.experiment.log_dir, "checkpoints"),
         name_prefix="rl_model"
     )
-    wandb_callback = WandbCallback(
+    wandb_callback = CustomWandbCallback(
         # model_save_path=f"models/{run.id}",
         verbose=2,
         # log="all",  # Log all variables
-        log_interval=1
+        log_interval=1,
+        reward_setting=cfg.task.task.reward_setting
     )
     # Train the model
     if cfg.model.agent.name != "Threshold":
@@ -463,13 +539,31 @@ def main(cfg: DictConfig):
             model.save(f"{cfg.experiment.log_dir}/final_model_{cfg.model.agent.name}_{cfg.experiment.id}.zip")
 
         # Run evaluation episode
-        best_model = model.load(os.path.join(best_model_path, "best_model"))
+        if cfg.experiment.setting == "train":
+            best_model = model.load(os.path.join(best_model_path, "best_model"))
+        elif cfg.experiment.setting == "eval":
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            model_path = os.path.join(current_dir, cfg.experiment.model_path)
+            best_model = model.load(model_path)
+            cfg.task.task.reward_setting = cfg.experiment.model_path.split("_")[3].split(".")[0]
+        #
+        # current_dir = os.path.dirname(os.path.abspath(__file__))
+        # model_path = os.path.join(current_dir, "best_model_R4.zip")
+        # best_model = model.load(model_path)
+        if cfg.experiment.setting == "train" or cfg.experiment.setting == "eval":
+            mean_eval_reward = run_evaluation(cfg, best_model, storage_strategy)
 
-        mean_eval_reward = run_evaluation_tensorboard(cfg, best_model, storage_strategy)
+        # evaluate_policy(
+        #     best_model,
+        #     eval_env,
+        #     n_eval_episodes=1,
+        #     render=False,
+        #     deterministic=True,
+        #     return_episode_rewards=True,
+        # )
     else:
-        mean_eval_reward = run_evaluation_tensorboard(cfg, model, storage_strategy, state_converter=False)
+        mean_eval_reward = run_evaluation(cfg, model, storage_strategy, state_converter=False)
     wandb.finish()
-    print(mean_eval_reward)
     return mean_eval_reward
 
 

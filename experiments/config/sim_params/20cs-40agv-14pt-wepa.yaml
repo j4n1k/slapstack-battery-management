@@ -15,3 +15,4 @@ sim_params:
   charge_during_breaks: false
   partition_by_week: true
   partition_by_day: false
+  interrupt_charging_mode: false

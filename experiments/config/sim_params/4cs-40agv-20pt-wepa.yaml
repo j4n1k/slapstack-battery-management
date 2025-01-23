@@ -5,7 +5,7 @@ defaults:
 sim_params:
   use_case: wepastacks_bm
   use_case_n_partitions: 20
-  n_agvs: 40
+  n_agvs: 0
   initial_pallets_storage_strategy: "ConstantTimeGreedyPolicy"
   pure_lanes: true
   n_levels: 3

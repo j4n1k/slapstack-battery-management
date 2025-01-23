@@ -1,5 +1,6 @@
 import json
 from collections import defaultdict
+from math import inf
 from os.path import join, abspath, sep
 from typing import Tuple, TYPE_CHECKING, Union, Dict, Set, List
 
@@ -52,14 +53,19 @@ class ChargingStrategy:
 class OutputConverter:
     def __init__(self, feature_list=None):
         self.feature_list = feature_list
+        self.kpi_last_episode = - inf
+
     def modify_state(self, state: 'State') -> np.ndarray:
         pass
 
     def calculate_reward(self, state: 'State', action: int,
-                         legal_actions: list, decision_mode: str):
+                         legal_actions: list, decision_mode: str, agv_id=None):
         pass
 
     def reset(self):
+        pass
+
+    def on_interrupt(self, data):
         pass
 
 class SimulationParameters:
@@ -104,11 +110,13 @@ class SimulationParameters:
                  partition_by_week: bool = False,
                  partition_by_day: bool = False,
                  charge_during_breaks: bool = False,
-                 interrupt_charging_mode: bool = False
+                 interrupt_charging_mode: bool = False,
+                 n_cs: int = 0
                  ):
 
         # The inpt that are not required when usecase is provided.
         # https://www.kuka.com/en-de/products/mobility/mobile-platforms/kmp-1500
+        self.n_cs = n_cs
         self.battery_charging_h = battery_charging_h
         self.battery_consumption_h = battery_consumption_h
         self.battery_consumption_loaded_h = battery_consumption_loaded_h

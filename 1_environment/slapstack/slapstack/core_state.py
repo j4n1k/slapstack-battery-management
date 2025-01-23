@@ -294,12 +294,24 @@ class State:
         self.interrupted_agv = None
         self.order_arrival_time = None
         # debugging information
+        self.orders_next_hour = 0
         self.incomplete_orders = {}
         self.travel_events = {}
         self.done = False
         self.current_destination = None
         self.door_to_door = params.door_to_door
         self.next_main_event_time = 0
+        self.not_served = 0
+        self.previous_agv = None
+        self.last_reward = 0
+        self.last_queue_zero_reward = 0
+        self.last_free_cs_reward = 0
+        self.last_free_cs_penalty = 0
+        self.last_no_amr_penalty = 0
+        self.last_amr_ratio = 0
+        self.last_st = 0
+        self.last_queue_ratio = 0
+        self.next_e = None
 
     def get_mid_aisles(self):
         mid_aisles = [tuple(i[0:2]) for i in np.argwhere(self.S[:, :, 0] ==
