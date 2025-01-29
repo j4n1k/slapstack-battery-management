@@ -1,19 +1,19 @@
 defaults:
   - model: ppo
   - task: combined
-  - sim_params: 20cs-40agv-14pt-wepa #20cs-40agv-14pt-wepa
+  - sim_params: 7cs-7agv-1pt-cross #20cs-40agv-14pt-wepa
   - _self_
 
 experiment:
   name: "agv_charging_rl"
-  setting: "train"
-  model_path: "./best_model/best_model_R4.zip"
+  setting: "eval"
+  model_path: "./best_model/best_model_R3.zip"
   log_dir: "./logs"
   total_timesteps: 4000000
   eval_freq: 200000
   n_eval_episodes: 4
-  t_pt: [2, 3, 5, 13] # 1, 2, 3, 4, 5, 6
-  e_pt: [2, 3, 5, 13] # , 3, 5, 13 # 7, 8
+  t_pt: [0] # 1, 2, 3, 4, 5, 6
+  e_pt: [0] # , 3, 5, 13 # 7, 8
   n_cs: 3
   feature_list: [
                  "travel_time_retrieval_avg", "average_distance", "utilization_time", "distance_retrieval_avg",

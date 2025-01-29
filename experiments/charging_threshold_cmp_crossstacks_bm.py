@@ -100,11 +100,11 @@ def get_charging_strategies():
     charging_strategies = []
 
     charging_strategies += [
-        FixedChargePolicy(30),
-        FixedChargePolicy(40),
-        FixedChargePolicy(50),
-        FixedChargePolicy(60),
-        FixedChargePolicy(70),
+        # FixedChargePolicy(30),
+        # FixedChargePolicy(40),
+        # FixedChargePolicy(50),
+        # FixedChargePolicy(60),
+        # FixedChargePolicy(70),
         FixedChargePolicy(80),
         # FixedChargePolicy(90),
         # FixedChargePolicy(100),
@@ -115,10 +115,10 @@ def get_charging_strategies():
 
 params = SimulationParameters(
     use_case="crossstacks_bm",
-    use_case_n_partitions=2,
+    use_case_n_partitions=1,
     use_case_partition_to_use=0,
     partition_by_day=True,
-    n_agvs=15,
+    n_agvs=20,
     generate_orders=False,
     verbose=False,
     resetting=False,
@@ -135,8 +135,9 @@ params = SimulationParameters(
     # update_partial_paths=False,
     agv_forks=1,
     charging_thresholds=[40, 50, 60, 70, 80],
-    charge_during_breaks=True,
-    battery_capacity=52
+    charge_during_breaks=False,
+    battery_capacity=52,
+    interrupt_charging_mode=True
 )
 
 charging_strategies = get_charging_strategies()

@@ -9,6 +9,37 @@ from slapstack.core_state_location_manager import LocationTrackers, LocationMana
 from slapstack.helpers import TravelEventKeys
 from slapstack.interface_templates import OutputConverter
 
+class RewardNormalizer:
+    def __init__(self, epsilon=1e-8):
+        self.mean = 0.0
+        self.var = 1.0
+        self.count = 0.0
+        self.epsilon = epsilon
+
+    def update(self, reward):
+        self.count += 1
+        alpha = 1 / self.count
+        delta = reward - self.mean
+        self.mean += alpha * delta
+        self.var = (1 - alpha) * self.var + alpha * delta**2
+
+    def normalize(self, reward):
+        return (reward - self.mean) / (self.var**0.5 + self.epsilon)
+
+
+class SlidingRewardNormalizer:
+    def __init__(self, window_size=200000, epsilon=1e-8):
+        self.rewards = deque(maxlen=window_size)
+        self.epsilon = epsilon
+
+    def update(self, reward):
+        self.rewards.append(reward)
+
+    def normalize(self, reward):
+        mean = sum(self.rewards) / len(self.rewards)
+        var = sum((r - mean) ** 2 for r in self.rewards) / len(self.rewards)
+        return (reward - mean) / (var**0.5 + self.epsilon)
+
 
 class LegacyOutputConverter:
     def __init__(self, reward_type="average_travel_length", state_modifier=None):
@@ -332,6 +363,8 @@ class FeatureConverterCharging(OutputConverter):
         self.history_window = 1000
         self.service_time_history = []
         self.trend_window = 6000
+        self.normalizer = RewardNormalizer()
+        self.sliding_normalizer = SlidingRewardNormalizer()
 
     def init_fill_level_per_lane(self, state: State):
         lt: LocationTrackers = state.location_manager.location_trackers
@@ -942,6 +975,7 @@ class FeatureConverterCharging(OutputConverter):
         self.util_last_step = 0
         self.feature_stack = deque(maxlen=self.n_stacks)
         # self.service_time_history = []
+        # self.normalizer = RewardNormalizer()
 
     def calculate_reward(self,
                          state: State,
@@ -997,8 +1031,8 @@ class FeatureConverterCharging(OutputConverter):
             if self.reward_setting == 1:
                 # if state.done:
                 # clipped_st = max(state.trackers.average_service_time, 3600)
-                clipped_st = min(8000, state.trackers.average_service_time)
-                return - state.trackers.average_service_time
+                # clipped_st = min(8000, state.trackers.average_service_time)
+                return - state.trackers.average_service_time / 3600
                 # else:
                 #     return 0
                 # return 1 - (state.trackers.average_service_time / 600)
@@ -1023,10 +1057,10 @@ class FeatureConverterCharging(OutputConverter):
                     # else:
                     # battery level (dont charge with high battery) + working agv ratio (dont charge when busy state)
                     # return (agv.battery / 100) + (state.agv_manager.get_n_busy_agvs() / state.agv_manager.n_agvs)
-            # elif self.reward_setting == 2:
-            #     total_queue = state.trackers.n_queued_delivery_orders + state.trackers.n_queued_retrieval_orders
-            #     clipped_queue = min(350, total_queue)
-            #     return - (clipped_queue / 350) #* 10
+            elif self.reward_setting == 2:
+                total_queue = state.trackers.n_queued_delivery_orders + state.trackers.n_queued_retrieval_orders
+                clipped_queue = min(350, total_queue)
+                return - total_queue / 350
             # elif self.reward_setting == 1:
             #     agv_id = state.current_agv
             #     agv = state.agv_manager.agv_index[agv_id]
@@ -1044,24 +1078,24 @@ class FeatureConverterCharging(OutputConverter):
             #     # self.n_orders_last_step = n_orders_now
             #     return delta_service_time #+ penalty
             #Reward 2
-            elif self.reward_setting == 2:
-                min_delta = -10  # Minimum allowable delta (negative change)
-                max_delta = 1 # 1
-                # if state.agv_manager.agv_trackers.n_charges == 0:
-                #     self.service_time_last_step = state.trackers.average_service_time
-                #     return 0
-                current_queue = state.trackers.n_queued_delivery_orders + state.trackers.n_queued_retrieval_orders
-                clipped_queue = min(350, current_queue)
-                current_service_time = state.trackers.average_service_time
-                clipped_st = min(3600, current_service_time)
-                delta_service_time = self.service_time_last_step - current_service_time
-                delta_queue = self.queue_last_step - clipped_queue #/ 350
-                self.queue_last_step = clipped_queue
-                self.service_time_last_step = current_service_time
-                clipped_delta = max(min(delta_service_time * 10, max_delta), min_delta)
-                # self.n_orders_last_step = n_orders_now
-                # return delta_service_time * 10
-                return delta_queue - (clipped_st / 3600) #delta_service_time +  # - (clipped_queue / 350)
+            # elif self.reward_setting == 2:
+            #     min_delta = -10  # Minimum allowable delta (negative change)
+            #     max_delta = 1 # 1
+            #     # if state.agv_manager.agv_trackers.n_charges == 0:
+            #     #     self.service_time_last_step = state.trackers.average_service_time
+            #     #     return 0
+            #     current_queue = state.trackers.n_queued_delivery_orders + state.trackers.n_queued_retrieval_orders
+            #     clipped_queue = min(350, current_queue)
+            #     current_service_time = state.trackers.average_service_time
+            #     clipped_st = min(3600, current_service_time)
+            #     delta_service_time = self.service_time_last_step - current_service_time
+            #     delta_queue = self.queue_last_step - clipped_queue #/ 350
+            #     self.queue_last_step = clipped_queue
+            #     self.service_time_last_step = current_service_time
+            #     clipped_delta = max(min(delta_service_time * 10, max_delta), min_delta)
+            #     # self.n_orders_last_step = n_orders_now
+            #     # return delta_service_time * 10
+            #     return delta_queue - (clipped_st / 3600) #delta_service_time +  # - (clipped_queue / 350)
 
             # elif self.reward_setting == 3:
             #     total_queue = state.trackers.n_queued_delivery_orders + state.trackers.n_queued_retrieval_orders
@@ -1110,44 +1144,73 @@ class FeatureConverterCharging(OutputConverter):
                 n_free_amr = state.agv_manager.get_n_free_agvs()
                 n_depleted_amr = state.agv_manager.get_n_depleted_agvs()
                 queue_greater_zero = 1 if total_queue > 0 else 0
-                return (- (clipped_st / 3600)
-                        - (clipped_queue / 350)
+                good_charge = 1 if action > 0 and total_queue == 0 else 0
+                return (- 1 * (clipped_st / 3600)
+                        - 1 * (clipped_queue / 350)
+                        # + (n_free_amr / state.agv_manager.n_agvs) * queue_greater_zero
                         # - (n_depleted_amr / state.agv_manager.n_agvs) * queue_greater_zero
-                        + (n_free_amr / state.agv_manager.n_agvs) * queue_greater_zero
-                        # - (state.agv_manager.n_charging_agvs / state.agv_manager.n_agvs) * queue_greater_zero
+                        # + good_charge
+                        - (state.agv_manager.n_charging_agvs / state.agv_manager.n_agvs) * queue_greater_zero
                         # + ((state.agv_manager.get_average_agv_battery() / 100) * clipped_queue / 350)
                         )
 
             elif self.reward_setting == 5:
-                agv = state.agv_manager.agv_index[state.previous_agv]
-                agv_battery_level = agv.battery
-                total_queue = state.trackers.n_queued_delivery_orders + state.trackers.n_queued_retrieval_orders
-                n_depleted_amr = state.agv_manager.get_n_depleted_agvs()
-                n_free_amr = state.agv_manager.get_n_free_agvs()
-                queue_greater_zero = 1 if total_queue > 0 else 0
-                if action > 0:
-                    if total_queue > 0:
-                        return -1
-                    elif total_queue == 0:
-                        return 1
-                elif action == 0:
-                    if total_queue > 0:
-                        return 1
-                    elif total_queue == 0:
-                        return -1
+                min_reward = -140000
+                max_reward = 0
+                reward_range = max_reward - min_reward
 
-            elif self.reward_setting == 6:
                 total_queue = state.trackers.n_queued_delivery_orders + state.trackers.n_queued_retrieval_orders
-                clipped_queue = min(total_queue, 350)
+                clipped_queue = min(350, total_queue)
                 clipped_st = min(3600, state.trackers.average_service_time)
                 n_free_amr = state.agv_manager.get_n_free_agvs()
-                n_working_amr = state.agv_manager.get_n_busy_agvs()
-                n_depleted_amr = state.agv_manager.get_n_depleted_agvs()
                 queue_greater_zero = 1 if total_queue > 0 else 0
-                queue_zero = 1 if total_queue == 0 else 0
-                # return - 2 * (clipped_queue/ 350) - (n_depleted_amr / state.agv_manager.n_agvs) * (clipped_queue / 350) + state.agv_manager.get_average_agv_battery() / 100
-                # return (n_free_amr + n_working_amr) * (clipped_queue / 350) + state.agv_manager.get_average_agv_battery() / 100
-                return -(clipped_queue / 350) + (n_free_amr + n_working_amr) * (clipped_queue / 350) + n_depleted_amr * queue_zero
+
+                raw_reward = (
+                              - state.trackers.average_service_time
+                              # - (clipped_st / 3600)
+                              # - (clipped_queue / 350)
+                              # + (n_free_amr / state.agv_manager.n_agvs) * queue_greater_zero
+                              )
+                normalized_reward = (raw_reward - min_reward) / reward_range
+                return normalized_reward
+
+            elif self.reward_setting == 6:
+                raw_reward = - state.trackers.average_service_time
+                clipped_st = min(3600, state.trackers.average_service_time)
+                # raw_reward = - (clipped_st / 3600)
+                self.sliding_normalizer.update(raw_reward)
+                normalized_reward = self.sliding_normalizer.normalize(raw_reward)
+                return normalized_reward
+            # elif self.reward_setting == 5:
+            #     agv = state.agv_manager.agv_index[state.previous_agv]
+            #     agv_battery_level = agv.battery
+            #     total_queue = state.trackers.n_queued_delivery_orders + state.trackers.n_queued_retrieval_orders
+            #     n_depleted_amr = state.agv_manager.get_n_depleted_agvs()
+            #     n_free_amr = state.agv_manager.get_n_free_agvs()
+            #     queue_greater_zero = 1 if total_queue > 0 else 0
+            #     if action > 0:
+            #         if total_queue > 0:
+            #             return -1
+            #         elif total_queue == 0:
+            #             return 1
+            #     elif action == 0:
+            #         if total_queue > 0:
+            #             return 1
+            #         elif total_queue == 0:
+            #             return -1
+
+            # elif self.reward_setting == 6:
+            #     total_queue = state.trackers.n_queued_delivery_orders + state.trackers.n_queued_retrieval_orders
+            #     clipped_queue = min(total_queue, 350)
+            #     clipped_st = min(3600, state.trackers.average_service_time)
+            #     n_free_amr = state.agv_manager.get_n_free_agvs()
+            #     n_working_amr = state.agv_manager.get_n_busy_agvs()
+            #     n_depleted_amr = state.agv_manager.get_n_depleted_agvs()
+            #     queue_greater_zero = 1 if total_queue > 0 else 0
+            #     queue_zero = 1 if total_queue == 0 else 0
+            #     # return - 2 * (clipped_queue/ 350) - (n_depleted_amr / state.agv_manager.n_agvs) * (clipped_queue / 350) + state.agv_manager.get_average_agv_battery() / 100
+            #     # return (n_free_amr + n_working_amr) * (clipped_queue / 350) + state.agv_manager.get_average_agv_battery() / 100
+            #     return -(clipped_queue / 350) + (n_free_amr + n_working_amr) * (clipped_queue / 350) + n_depleted_amr * queue_zero
 
             elif self.reward_setting == 7:
                 total_queue = state.trackers.n_queued_delivery_orders + state.trackers.n_queued_retrieval_orders
@@ -1940,6 +2003,8 @@ class FeatureConverterCharging(OutputConverter):
                 reward = 0
                 free_cs = self.f_get_free_cs_available(state)
                 total_queue = state.trackers.n_queued_delivery_orders + state.trackers.n_queued_retrieval_orders
+                n_free_amr = state.agv_manager.get_n_free_agvs()
+                n_charging_amr = state.agv_manager.n_charging_agvs
                 state.last_queue_zero_reward = 0
                 state.last_free_cs_reward = 0
                 state.last_free_cs_penalty = 0
@@ -1956,10 +2021,12 @@ class FeatureConverterCharging(OutputConverter):
                 if state.agv_manager.n_free_agvs == 0 and action == 1:
                     state.last_no_amr_penalty = -1
                     reward -= 1
+                # if total_queue > 0 and n_free_amr == 0 and n_charging_amr > 0:
+                #     reward -= 1
                 n_charging_agvs_ratio = state.agv_manager.n_charging_agvs / state.agv_manager.n_agvs
                 state.last_amr_ratio = - n_charging_agvs_ratio
                 state.last_queue_ratio = - (total_queue / 350)
-                return reward - (total_queue / 350) - n_charging_agvs_ratio # - (clipped_st / 3600)
+                return reward # - (total_queue / 350) - n_charging_agvs_ratio # - (clipped_st / 3600)
 
             # elif self.reward_setting == 25:
             #     reward = 0

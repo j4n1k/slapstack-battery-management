@@ -192,61 +192,6 @@ def run_episode(simulation_parameters: SimulationParameters,
     return parametrization_failure, df_actions
 
 
-def run_evaluation_agv(cfg, model, storage_strategy, state_converter=True):
-    # writer = SummaryWriter(log_dir=cfg.experiment.log_dir)
-    e_partitions = cfg.evaluation.eval_partitions
-    reward = 0
-    for pt_idx in e_partitions:
-        params = SimulationParameters(
-            use_case=cfg.sim_params.use_case,
-            use_case_n_partitions=cfg.sim_params.use_case_n_partitions,
-            use_case_partition_to_use=pt_idx,
-            partition_by_week=cfg.sim_params.partition_by_week,
-            partition_by_day=cfg.sim_params.partition_by_day,
-            n_agvs=cfg.sim_params.n_agvs,
-            generate_orders=cfg.sim_params.generate_orders,
-            verbose=cfg.sim_params.verbose,
-            resetting=cfg.sim_params.resetting,
-            initial_pallets_storage_strategy=storage_strategy,
-            pure_lanes=cfg.sim_params.pure_lanes,
-            agv_speed=cfg.sim_params.agv_speed,
-            unit_distance=cfg.sim_params.unit_distance,
-            pallet_shift_penalty_factor=cfg.sim_params.pallet_shift_penalty_factor,
-            compute_feature_trackers=cfg.sim_params.compute_feature_trackers,
-            n_levels=cfg.sim_params.n_levels,
-            charging_thresholds=list(cfg.task.task.charging_thresholds),
-            charge_during_breaks=cfg.sim_params.charge_during_breaks,
-            battery_capacity=cfg.sim_params.battery_capacity,
-            interrupt_charging_mode=cfg.sim_params.interrupt_charging_mode
-
-        )
-
-        parametrization_failure = True
-        while parametrization_failure:
-            params.n_agvs += 1
-            parametrization_failure, episode_results = run_episode(
-                simulation_parameters=params,
-                cfg=cfg,
-                model=model,
-                print_freq=1000,
-                log_dir=cfg.experiment.log_dir,
-                writer=None,
-                state_converter=state_converter,
-                stop_condition=True
-            )
-
-        # Log scalar values
-        # writer.add_scalar('Evaluation/Total_Reward', episode_results['kpi__makespan'].iloc[-1], pt_idx)
-        #writer.add_scalar('Evaluation/Episode_Length', episode_results['episode_length'], pt_idx)
-        # writer.add_scalar('Evaluation/Avg_Battery_Level', episode_results['avg_battery_level'], pt_idx)
-        # writer.add_scalar('Evaluation/N_Charging_Events', episode_results['n_queued_charging_events'], pt_idx)
-        # writer.add_scalar('Evaluation/N_Retrieval_Orders', episode_results['n_queued_retrieval_orders'], pt_idx)
-
-        # Log action distribution
-        # reward += episode_results["kpi__average_service_time"]
-
-    return reward / len(e_partitions)
-
 def run_evaluation(cfg, model, storage_strategy, state_converter=True):
     writer = SummaryWriter(log_dir=cfg.experiment.log_dir)
     e_partitions = cfg.evaluation.eval_partitions
@@ -286,16 +231,6 @@ def run_evaluation(cfg, model, storage_strategy, state_converter=True):
             state_converter=state_converter
         )
 
-        # Log scalar values
-        # writer.add_scalar('Evaluation/Total_Reward', episode_results['kpi__makespan'].iloc[-1], pt_idx)
-        #writer.add_scalar('Evaluation/Episode_Length', episode_results['episode_length'], pt_idx)
-        # writer.add_scalar('Evaluation/Avg_Battery_Level', episode_results['avg_battery_level'], pt_idx)
-        # writer.add_scalar('Evaluation/N_Charging_Events', episode_results['n_queued_charging_events'], pt_idx)
-        # writer.add_scalar('Evaluation/N_Retrieval_Orders', episode_results['n_queued_retrieval_orders'], pt_idx)
-
-        # Log action distribution
-        # reward += episode_results["kpi__average_service_time"]
-
     writer.close()
     return reward / len(e_partitions)
 
@@ -303,17 +238,6 @@ def run_evaluation(cfg, model, storage_strategy, state_converter=True):
 def mask_fn(env: SlapEnv):
     return env.valid_action_mask()
 
-
-# def mask_fn(env):
-#     """Get action mask for environment"""
-#     if hasattr(env, 'valid_action_mask'):
-#         return env.valid_action_mask()
-#     if hasattr(env, 'env'):
-#         return mask_fn(env.env)
-#     if hasattr(env, 'envs'):
-#         # For vectorized environments, return mask for first env
-#         return mask_fn(env.envs[0])
-#     raise ValueError("Environment doesn't have valid_action_mask method")
 
 def make_env(sim_params, log_frequency, nr_zones, logfile_name, log_dir, partitions, reward_setting, cfg):
     def _init():
@@ -424,12 +348,11 @@ def main(cfg: DictConfig):
 
     # env = VecNormalize(
     #     env,
-    #     norm_obs=True,  # Normalize observations
+    #     norm_obs=False,  # Normalize observations
     #     norm_reward=True,  # Normalize rewards
     #     clip_reward=10.0,  # Clip normalized rewards
     #     gamma=0.99,  # Discount factor
     #     training=True,  # Update reward normalization statistics during training,
-    #     norm_obs_keys=["travel_time_retrieval_avg", "average_distance", "utilization_time", "distance_retrieval_avg"]
     # )
 
     # env = VecMonitor(env)
@@ -478,6 +401,9 @@ def main(cfg: DictConfig):
                             verbose=1,
                             tensorboard_log="./dqn_charging_tensorboard/",
                             device="cpu",
+                            # learning_rate=1e-4,
+                            # n_epochs=5,
+                            # ent_coef=0.01
                             )
     elif cfg.model.agent.name == "DQN":
         model = DQN("MlpPolicy", env, verbose=1, tensorboard_log="./dqn_charging_tensorboard/")
@@ -548,7 +474,7 @@ def main(cfg: DictConfig):
             cfg.task.task.reward_setting = cfg.experiment.model_path.split("_")[3].split(".")[0]
         #
         # current_dir = os.path.dirname(os.path.abspath(__file__))
-        # model_path = os.path.join(current_dir, "best_model_R4.zip")
+        # model_path = os.path.join(current_dir, "best_model_R3.zip")
         # best_model = model.load(model_path)
         if cfg.experiment.setting == "train" or cfg.experiment.setting == "eval":
             mean_eval_reward = run_evaluation(cfg, best_model, storage_strategy)
