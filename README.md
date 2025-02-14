@@ -254,6 +254,14 @@ use case and vice-versa, however this application has not yet been tested.
 The following unit load selection problem (ULSP) policies are implemented:
 * Batch Last In First Out (BLIFO)
 
+# Battery Management
+In this package we introduce battery management related extensions to SLAPStack.  
+This adds charging stations to the warehouse layout and battery consumption and replenishment mechanisms to the AMRs.  
+We further introduce multiple charging strategies to handle the charging decision and charging duration.  
+The strategies are implemented in SLAPStack-Controls.  
+
+name: {n_cs}cs-{n_agv}agv-{n_pt}pt-{use_case_name}
+
 # Getting Started
 ## Installation
 We publish this project alongside our experiment script and a control package containing various SLAP heuristics as well as a ULSP heuristic. To set up your environment and recreate our experiment results, the following steps can be taken:

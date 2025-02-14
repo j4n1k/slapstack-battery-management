@@ -1,9 +1,8 @@
-import csv
-import os
 import pickle
-import shutil
 import time
-from os.path import exists, abspath, sep
+import shutil
+import os
+from os.path import exists,  abspath, sep
 
 import numpy as np
 import pandas as pd
@@ -244,14 +243,18 @@ class LoopControl:
 
     def stop_prematurely(self):
         t = self.state.trackers
-        if (t.average_service_time > 1800
-                or t.n_queued_delivery_orders > 627
-                or t.n_queued_retrieval_orders > 693):
+        if (t.n_queued_delivery_orders > 240
+                or t.n_queued_retrieval_orders > 330):
             return True
+        # if (t.n_queued_delivery_orders > 627
+        #         or t.n_queued_retrieval_orders > 693
+        #         or t.average_service_time > 1800):
+        #     return True
         return False
 
 
 def _init_run_loop(simulation_parameters, storage_strategy, log_dir):
+    week = simulation_parameters.use_case_partition_to_use
     if hasattr(storage_strategy, 'n_zones'):
         environment: SlapEnv = get_episode_env(
             sim_parameters=simulation_parameters,
@@ -264,17 +267,19 @@ def _init_run_loop(simulation_parameters, storage_strategy, log_dir):
     loop_controls = LoopControl(environment)
     # state.state_cache.perform_sanity_check()
     environment.core_env.logger.set_logfile_name(
-        f'{storage_strategy.name}_n{simulation_parameters.n_agvs}')
+        f'pt_{week}_COL_nointerrupt_th100_n{simulation_parameters.n_agvs}_n{simulation_parameters.n_cs}')
     return environment, loop_controls
 
 
 def run_episode(simulation_parameters: SimulationParameters,
                 storage_strategy: StoragePolicy,
                 charging_strategy: ChargingPolicy,
-                charging_check_strategy,
+                charging_check_strategy: ChargingPolicy,
                 print_freq=0,
                 warm_start=False, log_dir='./result_data/',
-                stop_condition=False, pickle_at_decisions=np.infty):
+                stop_condition=False, pickle_at_decisions=np.infty,
+                testing=False,
+                ):
     pickle_path = (f'end_env_{storage_strategy.name}_'
                    f'{pickle_at_decisions}.pickle')
     env, loop_controls = _init_run_loop(
@@ -301,7 +306,7 @@ def run_episode(simulation_parameters: SimulationParameters,
                 loop_controls.state, env.core_env)
         else:
             action = storage_strategy.get_action(loop_controls.state)
-        output, reward, loop_controls.done, info = env.step(action)
+        output, reward, loop_controls.done, info, _ = env.step(action)
         if print_freq and loop_controls.n_decisions % print_freq == 0:
             if loop_controls.n_decisions > pickle_at_decisions:
                 pickle.dump(env, open(pickle_path, 'wb'))
@@ -321,13 +326,19 @@ def run_episode(simulation_parameters: SimulationParameters,
     ExperimentLogger.print_episode_info(
         storage_strategy.name, start, loop_controls.n_decisions,
         loop_controls.state)
-    return parametrization_failure
+    if not testing:
+        return parametrization_failure
+    else:
+        return loop_controls.state
 
 
 def get_episode_env(sim_parameters: SimulationParameters,
                     log_frequency: int, nr_zones: int,
-                    log_dir='./result_data/'):
+                    log_dir='./result_data/',
+                    partitions=None):
     seeds = [56513]
+    if partitions is None:
+        partitions = [None]
     if isinstance(sim_parameters.initial_pallets_storage_strategy,
                   ClassBasedPopularity):
         sim_parameters.initial_pallets_storage_strategy = ClassBasedPopularity(
@@ -337,7 +348,7 @@ def get_episode_env(sim_parameters: SimulationParameters,
             n_zones=nr_zones
         )
     return SlapEnv(
-        sim_parameters, seeds,
+        sim_parameters, seeds, partitions,
         logger=ExperimentLogger(
             filepath=log_dir,
             n_steps_between_saves=log_frequency,

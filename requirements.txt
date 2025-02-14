@@ -10,7 +10,8 @@ sortedcollections~=2.1.0
 nbstripout==0.6.1
 nbformat==5.9.2
 matplotlib~=3.8.2
-
+torch
+wandb
 seaborn==0.13.2
 gym==0.26.2
 scikit-learn==1.5.1

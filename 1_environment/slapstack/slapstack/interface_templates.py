@@ -1,5 +1,6 @@
 import json
 from collections import defaultdict
+from math import inf
 from os.path import join, abspath, sep
 from typing import Tuple, TYPE_CHECKING, Union, Dict, Set, List
 
@@ -52,14 +53,19 @@ class ChargingStrategy:
 class OutputConverter:
     def __init__(self, feature_list=None):
         self.feature_list = feature_list
+        self.kpi_last_episode = - inf
+
     def modify_state(self, state: 'State') -> np.ndarray:
         pass
 
     def calculate_reward(self, state: 'State', action: int,
-                         legal_actions: list, decision_mode: str):
+                         legal_actions: list, decision_mode: str, agv_id=None):
         pass
 
     def reset(self):
+        pass
+
+    def on_interrupt(self, data):
         pass
 
 class SimulationParameters:
@@ -78,7 +84,7 @@ class SimulationParameters:
                  verbose: bool = False,
                  agv_speed: float = 2.0,
                  unit_distance: float = 1.4,
-                 pallet_shift_penalty_factor: int = 10,
+                 pallet_shift_penalty_factor: int = 10, # TODO evtl. erhöhen
                  n_rows: int = None,
                  n_columns: int = None,
                  n_levels: int = None,
@@ -101,10 +107,16 @@ class SimulationParameters:
                  battery_consumption_loaded_h: float = 20,  # 15
                  battery_charging_h: float = 80,  # 80
                  charging_thresholds: Union[list[int], Tuple[float, float]] = None,
+                 partition_by_week: bool = False,
+                 partition_by_day: bool = False,
+                 charge_during_breaks: bool = False,
+                 interrupt_charging_mode: bool = False,
+                 n_cs: int = 0
                  ):
 
         # The inpt that are not required when usecase is provided.
         # https://www.kuka.com/en-de/products/mobility/mobile-platforms/kmp-1500
+        self.n_cs = n_cs
         self.battery_charging_h = battery_charging_h
         self.battery_consumption_h = battery_consumption_h
         self.battery_consumption_loaded_h = battery_consumption_loaded_h
@@ -116,6 +128,8 @@ class SimulationParameters:
         self.charging_rate = ((self.battery_charging_h / 3600)
                               / self.battery_capacity) * 100
         self.charging_thresholds = charging_thresholds
+        self.charge_during_breaks = charge_during_breaks
+        self.interrupt_charging_mode = interrupt_charging_mode
         self.material_handling_time = material_handling_time
         optionals = [
             n_rows, n_columns, n_levels, n_skus, all_skus, n_orders, order_list,
@@ -126,7 +140,7 @@ class SimulationParameters:
         if use_case is not None:
             assert use_case_partition_to_use is not None
             assert use_case_n_partitions is not None
-            assert use_case_partition_to_use <= use_case_n_partitions
+#            assert use_case_partition_to_use <= use_case_n_partitions
             self.n_levels = n_levels
             self.use_case_name = use_case
             self.use_case_n_partitions = use_case_n_partitions
@@ -134,7 +148,12 @@ class SimulationParameters:
             self.layout_path, self.order_path, self.initial_sku_path = (
                 SimulationParameters.setup_paths(use_case))
             if use_case_n_partitions > 1:
-                self.get_initial_partitions_data(use_case_n_partitions)
+                if partition_by_week:
+                    self.get_initial_partitions_data_by_week()
+                elif partition_by_day:
+                    self.get_initial_partitions_data_by_day()
+                else:
+                    self.get_initial_partitions_data(use_case_n_partitions)
             use_case_partitions = self.partition_use_case(use_case_n_partitions)
             use_case = use_case_partitions[0]
             self.n_rows = use_case.layout.shape[0]
@@ -155,7 +174,7 @@ class SimulationParameters:
             self.n_skus_in = use_case.sku_in_counts
             self.n_skus_out = use_case.sku_out_counts
             self.sku_period = use_case.current_week
-            self.desired_fill_level = None
+            self.desired_fill_level = desired_fill_level
             self.shape = use_case.layout.shape + (use_case.n_levels,)
             self.door_to_door = door_to_door
             self.n_forks = agv_forks
@@ -301,6 +320,114 @@ class SimulationParameters:
                     json.dump(orders, json_file, ensure_ascii=False)
                 pt += 1
 
+    def get_initial_partitions_data_by_week(self):
+        import os
+        from copy import deepcopy
+
+        root_dir = sep.join([sep.join(
+            abspath(__file__).split(sep)[:-1]), "use_cases", self.use_case_name])
+
+        partition_dir = join(root_dir, "partitions")
+        if not os.path.exists(partition_dir):
+            os.makedirs(partition_dir)
+
+        skus_ini, _ = self.load_initial_skus(None)
+        order_data = self.load_orders(None)
+
+        # Group orders by week
+        order_data_by_week = {}
+        for order in order_data:
+            week = order[-1]  # Assuming the week is the last item in the order tuple
+            if week not in order_data_by_week:
+                order_data_by_week[week] = []
+            order_data_by_week[week].append(order)
+
+        initial_pallets_path = f"partitions/0_partition_fill_lvl.json"
+        with open(join(root_dir, initial_pallets_path), 'w', encoding='utf8') as json_file:
+            json.dump(skus_ini, json_file, ensure_ascii=False)
+
+        skus = deepcopy(skus_ini)
+        pt = 0
+
+        # Process each week's orders
+        for week, orders in order_data_by_week.items():
+            fill_levels = []
+            for order in orders:
+                if order[0] == "retrieval":
+                    skus[order[1]] -= 1
+                elif order[0] == "delivery":
+                    skus[order[1]] += 1
+                fill_levels.append((sum(skus.values()) / 19512))
+
+            # Save partition data
+            if max(fill_levels) <= 1:
+                partition_order_path = f"partitions/{pt}_partition_orders.json"
+                partition_pallets_path = f"partitions/{pt + 1}_partition_fill_lvl.json"
+
+                with open(join(root_dir, partition_pallets_path), 'w', encoding='utf8') as json_file:
+                    json.dump(skus, json_file, ensure_ascii=False)
+
+                with open(join(root_dir, partition_order_path), 'w', encoding='utf8') as json_file:
+                    json.dump(orders, json_file, ensure_ascii=False)
+
+                pt += 1
+
+    def get_initial_partitions_data_by_day(self):
+        import os
+        from copy import deepcopy
+
+        root_dir = sep.join([sep.join(
+            abspath(__file__).split(sep)[:-1]), "use_cases", self.use_case_name])
+
+        partition_dir = join(root_dir, "partitions")
+        if not os.path.exists(partition_dir):
+            os.makedirs(partition_dir)
+
+        skus_ini, _ = self.load_initial_skus(None)
+        order_data = self.load_orders(None)
+
+        # Group orders by week and day within each week
+        order_data_by_day = {}
+        for order in order_data:
+            week = order[-1]  # Assuming the week is the last item in the order tuple
+            time = order[2]  # Assuming time is the second-to-last item in the order tuple
+            day = time // 86400  # Calculate the day within the week (0 to 6)
+
+            if week not in order_data_by_day:
+                order_data_by_day[week] = {}
+            if day not in order_data_by_day[week]:
+                order_data_by_day[week][day] = []
+
+            order_data_by_day[week][day].append(order)
+
+        # Write the initial fill level to the first partition
+        initial_pallets_path = join(partition_dir, "0_partition_fill_lvl.json")
+        with open(initial_pallets_path, 'w', encoding='utf8') as json_file:
+            json.dump(skus_ini, json_file, ensure_ascii=False)
+
+        skus = deepcopy(skus_ini)
+        pt = 0
+
+        # Process each day's orders within each week and save them in separate files
+        for week, days in order_data_by_day.items():
+            for day, orders in days.items():
+                for order in orders:
+                    if order[0] == "retrieval":
+                        skus[order[1]] -= 1
+                    elif order[0] == "delivery":
+                        skus[order[1]] += 1
+                # Save each day's orders and the updated fill level as a separate partition
+                partition_order_path = f"partitions/{pt}_partition_orders.json"
+                partition_pallets_path = f"partitions/{pt + 1}_partition_fill_lvl.json"
+
+                with open(join(root_dir, partition_pallets_path), 'w', encoding='utf8') as json_file:
+                    json.dump(skus, json_file, ensure_ascii=False)
+
+                with open(join(root_dir, partition_order_path), 'w', encoding='utf8') as json_file:
+                    json.dump(orders, json_file, ensure_ascii=False)
+
+                pt += 1
+
     @staticmethod
     def get_unique_skus(
             orders: List[Tuple[str, int, int, int, int]]) -> Set[int]:
@@ -316,22 +443,25 @@ class SimulationParameters:
         return skus
 
     def load_initial_skus(self, use_case_idx: int):
-        if use_case_idx != None:
-            root_dir = sep.join([sep.join(
-                abspath(__file__).split(sep)[:-1]), "use_cases",
-                self.use_case_name])
-            partition_order_path = f"partitions/{use_case_idx}_partition_fill_lvl.json"
-            with open(join(root_dir, partition_order_path)) as json_file:
-                initial_fill_json = json.load(json_file)
-        else:
-            with open(self.initial_sku_path) as json_file:
-                initial_fill_json = json.load(json_file)
-        skus_ini = defaultdict(int)
-        all_skus = set(skus_ini.keys())
-        for sku, amount in initial_fill_json.items():
-            skus_ini[int(sku)] = amount
-            all_skus.add(int(sku))
-        return skus_ini, all_skus
+        try:
+            if use_case_idx != None:
+                root_dir = sep.join([sep.join(
+                    abspath(__file__).split(sep)[:-1]), "use_cases",
+                    self.use_case_name])
+                partition_order_path = f"partitions/{use_case_idx}_partition_fill_lvl.json"
+                with open(join(root_dir, partition_order_path)) as json_file:
+                    initial_fill_json = json.load(json_file)
+            else:
+                with open(self.initial_sku_path) as json_file:
+                    initial_fill_json = json.load(json_file)
+            skus_ini = defaultdict(int)
+            all_skus = set(skus_ini.keys())
+            for sku, amount in initial_fill_json.items():
+                skus_ini[int(sku)] = amount
+                all_skus.add(int(sku))
+            return skus_ini, all_skus
+        except FileNotFoundError:
+            return None, None
 
     def load_orders(self, use_case_idx: int):
         if use_case_idx != None:
@@ -382,7 +512,7 @@ class SimulationParameters:
         self.n_skus_in = use_case.sku_in_counts
         self.n_skus_out = use_case.sku_out_counts
         self.sku_period = use_case.current_week
-        self.desired_fill_level = None
+        self.desired_fill_level = self.desired_fill_level
         self.shape = use_case.layout.shape + (use_case.n_levels,)
 
 
@@ -400,8 +530,8 @@ class UseCasePartition:
                              current_week + 1: initial_skus.copy()}
         self.sku_in_counts = {current_week: defaultdict(int)}
         self.sku_out_counts = {current_week: defaultdict(int)}
-        if UseCasePartition.layout is None:
-            UseCasePartition.layout = UseCasePartition.get_layout(layout_path)
+        # if UseCasePartition.layout is None:
+        UseCasePartition.layout = UseCasePartition.get_layout(layout_path)
         self.n_levels = n_levels
         self.first_order = first_order
         self.last_order = first_order

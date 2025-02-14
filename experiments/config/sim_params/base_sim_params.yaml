@@ -3,6 +3,7 @@ sim_params:
   use_case_n_partitions: ???
   use_case_partition_to_use: 0
   n_agvs: ???
+  n_cs: ???
   generate_orders: false
   verbose: false
   resetting: false
@@ -13,3 +14,4 @@ sim_params:
   unit_distance: ???
   pallet_shift_penalty_factor: ???
   compute_feature_trackers: true
+  battery_capacity: 52

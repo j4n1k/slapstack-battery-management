@@ -261,7 +261,6 @@ class State:
 
         """
         # simulation inpt
-        self.next_main_event_time = 0
         self.n_initial_storage = -1
         self.params: SimulationParameters = params
         # matrices
@@ -292,14 +291,27 @@ class State:
         self.current_source_sink = 0
         self.current_sku = None
         self.current_agv = None
+        self.interrupted_agv = None
         self.order_arrival_time = None
         # debugging information
+        self.orders_next_hour = 0
         self.incomplete_orders = {}
         self.travel_events = {}
         self.done = False
         self.current_destination = None
         self.door_to_door = params.door_to_door
-        self.time_to_next_event = 0
+        self.next_main_event_time = 0
+        self.not_served = 0
+        self.previous_agv = None
+        self.last_reward = 0
+        self.last_queue_zero_reward = 0
+        self.last_free_cs_reward = 0
+        self.last_free_cs_penalty = 0
+        self.last_no_amr_penalty = 0
+        self.last_amr_ratio = 0
+        self.last_st = 0
+        self.last_queue_ratio = 0
+        self.next_e = None
 
     def get_mid_aisles(self):
         mid_aisles = [tuple(i[0:2]) for i in np.argwhere(self.S[:, :, 0] ==

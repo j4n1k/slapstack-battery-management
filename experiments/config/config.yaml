@@ -1,20 +1,35 @@
 defaults:
-  - model: th_100
-  - task: go_charging
-  - sim_params: 4cs-40agv-1pt-wepa
+  - model: ppo
+  - task: combined
+  - sim_params: 3cs-40agv-14pt-wepa
   - _self_
 
 experiment:
   name: "agv_charging_rl"
+  setting: "train"  # train, eval
+  model_path: "./best_model/best_model_R1.zip"
   log_dir: "./logs"
-  total_timesteps: 2000000
-  eval_freq: 60000
-  n_eval_episodes: 1
-  t_pt:
-  e_pt: 0
-  n_cs: 4
-  id: 1cs-20agv-1pt-cross-ppo-1reward-eval
+  total_timesteps: 4000000
+  eval_freq: 200000
+  n_eval_episodes: 4
+  t_pt: [2, 3, 5, 13]
+  e_pt: [2, 3, 5, 13]
+  feature_list: [
+                 "travel_time_retrieval_avg", "average_distance", "utilization_time", "distance_retrieval_avg",
+                 "agv_id",
+                  "n_depleted_agvs", "n_free_agv", "n_working_agvs", "avg_battery_working",
+                  "battery_cs1", "battery_cs2", "battery_cs3", "queue_len_cs1", "queue_len_cs2", "queue_len_cs3",
+                  "utilization",
+                  "global_fill_level", "curr_agv_battery", "dist_to_cs",
+                  "queue_len_retrieval_orders", "queue_len_delivery_orders",
+                  "hour_sin", "hour_cos", "day_of_week", "free_cs_available", "avg_entropy",
+                ]
+
+  id: "${now:%Y%m%d_%H%M%S}_${
+  sim_params.n_cs}cs-${
+  sim_params.n_agvs}agv-${
+  sim_params.use_case_n_partitions}-${
+  sim_params.use_case}"
 
 evaluation:
-  eval_partitions: [0]
-
+  eval_partitions: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]

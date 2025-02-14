@@ -1,3 +1,4 @@
 agent:
   name: "PPO"
   model_params:
+    ent_coef: 0.0

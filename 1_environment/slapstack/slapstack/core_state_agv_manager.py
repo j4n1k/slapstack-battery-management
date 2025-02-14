@@ -1,4 +1,4 @@
-from collections import defaultdict
+from collections import defaultdict, deque
 from math import inf, hypot
 import typing
 from typing import Tuple, Dict, List, Union, Set, Deque
@@ -9,6 +9,7 @@ from slapstack.core_state_route_manager import RouteManager
 
 from slapstack.helpers import VehicleKeys, StorageKeys
 from slapstack.interface_templates import SimulationParameters
+
 if typing.TYPE_CHECKING:
     from slapstack.core_events import Charging, EventManager
 
@@ -39,6 +40,7 @@ class AGV:
         self.n_charging_stops = 0
         self.orders_since_last_charge = 0
         self.charging = False
+        self.charge_started_at = -1
 
     def log_booking(self, booking_time: float):
         """
@@ -69,7 +71,9 @@ class AGV:
             self.charging = False
             self.n_charging_stops += 1
             self.charging_utilization += release_time - self.booking_time
+            self.avg_st_since_last_charge = 0
             self.util_since_last_charge = 0
+            self.orders_since_last_charge = 0
 
 
 class AgvManager:
@@ -111,6 +115,7 @@ class AgvManager:
         self.n_agvs = p.n_agvs
         self.n_visible_agvs = p.n_agvs
         self.booked_charging_stations: Dict[Tuple[int, int], List[AGV]] = {}
+        self.travel_to_charging_stations: Dict[Tuple[int, int], List[AGV]] = {}
         self.charging_stations: List[Tuple[int, int]] = list(tuple(map(
             tuple, np.argwhere(storage_matrix[:, :, 0]
                                == StorageKeys.CHARGING_STATION))))
@@ -118,13 +123,17 @@ class AgvManager:
             tuple, np.argwhere(storage_matrix[:, :, 0]
                                == StorageKeys.CHARGING_STATION))))
         self.queued_charging_events: Dict[Tuple[int, int], Deque[Charging]] = {
-            cs: [] for cs in self.free_charging_stations}
+            cs: deque() for cs in self.free_charging_stations}
         self.router = router
         self.n_charging_stations = len(np.argwhere(self.router.s[:, :, 0]
                                                    == StorageKeys.CHARGING_STATION))
         print(self.n_charging_stations)
         self.agv_trackers = AGVTrackers(self)
-
+        self.max_charging_time_frame = 14400  # 14400
+        self.charge_in_break_started = False
+        self.first_charge_during_break = False
+        self.full_time_delta = 0
+        self.time_of_next_main_event = 0
 
     @staticmethod
     def __get_n_agv_xy(n_agvs, arr):
@@ -312,7 +321,7 @@ class AgvManager:
                 if only_new:
                     if current_agv.servicing_order_type is None:
                         is_free_agv = True
-                elif current_agv.servicing_order_type == order_type\
+                elif current_agv.servicing_order_type == order_type \
                         or current_agv.servicing_order_type is None:
                     is_free_agv = True
                     break
@@ -377,8 +386,8 @@ class AgvManager:
         if agv.available_forks == 0:
             if not charging_booking:
                 self.n_busy_agvs += 1
-            else:
-                self.n_charging_agvs += 1
+            # else:
+            #     self.n_charging_agvs += 1
             self.n_free_agvs -= 1
             self.free_agv_positions[agv_pos].pop(free_agv_index)
         if not self.free_agv_positions[agv_pos]:
@@ -404,9 +413,10 @@ class AgvManager:
             #     pass
             # if (not agv.servicing_order_type == "charging_first_leg" or
             #         (self.charge_in_break_started and agv.scheduled_charging)):
-                # if not self.charge_needed(False, agv.id):
-            if (not agv.servicing_order_type == "charging_first_leg" and
-                    not agv.servicing_order_type == "charging_check"):
+            # if not self.charge_needed(False, agv.id):
+            if ((not agv.servicing_order_type == "charging_first_leg" and
+                 not agv.servicing_order_type == "charging_check") or
+                    (self.charge_in_break_started and agv.scheduled_charging)):
                 # if not self.charge_needed(False, agv.id):
                 self.booked_idle_positions.remove(agv_pos)
                 self.free_idle_positions.add(agv_pos)
@@ -434,7 +444,7 @@ class AgvManager:
         """
         released_agv = self.agv_index[agv_id]
         released_agv.log_release(system_time, position)
-        if position in self.free_agv_positions\
+        if position in self.free_agv_positions \
                 and released_agv.available_forks == 0:
             self.free_agv_positions[position].append(released_agv)
             self.n_busy_agvs -= 1
@@ -483,7 +493,7 @@ class AgvManager:
         try:
             assert agv.battery <= 100
         except:
-            print()
+            print("battery > 100")
 
     def deplete_battery(self, t, loaded: bool, agv_id: int):
         agv = self.agv_index[agv_id]
@@ -493,13 +503,26 @@ class AgvManager:
             consumption = self.consumption_rate_unloaded * t
         agv.battery -= consumption
 
-    def get_charging_station(self, agv_position, core):
+    def get_charging_station(self, agv_position, core=None):
         if len(self.free_charging_stations) > 0:
             cs = self.get_close_charging_station(agv_position)
             self.free_charging_stations.remove(cs)
         else:
             cs = self.get_least_queued_charging_station()
         return cs
+
+    def log_travel_to_cs(self, cs: Tuple[int, int], agv: AGV):
+        if cs in self.travel_to_charging_stations.keys():
+            self.travel_to_charging_stations[cs].append(agv)
+        else:
+            self.travel_to_charging_stations[cs] = [agv]
+
+    def release_travel_to_cs(self, cs: Tuple[int, int], agv: AGV):
+        try:
+            idx = self.travel_to_charging_stations[cs].index(agv)
+        except:
+            print("no cs booked")
+        self.travel_to_charging_stations[cs].pop(idx)
 
     def book_charging_station(self, cs: Tuple[int, int], agv: AGV):
         if cs in self.booked_charging_stations.keys():
@@ -508,7 +531,10 @@ class AgvManager:
             self.booked_charging_stations[cs] = [agv]
 
     def release_charging_station(self, cs: Tuple[int, int], agv: AGV):
-        idx = self.booked_charging_stations[cs].index(agv)
+        try:
+            idx = self.booked_charging_stations[cs].index(agv)
+        except:
+            print("no cs booked")
         self.booked_charging_stations[cs].pop(idx)
         if len(self.booked_charging_stations[cs]) == 0:
             self.free_charging_stations.add(cs)
@@ -552,7 +578,7 @@ class AgvManager:
         self.booked_idle_positions.add(selected_station)
         return selected_station
 
-    def get_close_agv(self, position: Tuple[int, int], order_type: str)\
+    def get_close_agv(self, position: Tuple[int, int], order_type: str) \
             -> Tuple[int, int]:
         """
         Iterates over the free AGVs in the free_agv_positions and selects the
@@ -569,7 +595,7 @@ class AgvManager:
             # current_agv = self.free_agv_positions[agv][-1]
             index = 0
             for current_agv in self.free_agv_positions[agv]:
-                if current_agv.servicing_order_type == order_type or\
+                if current_agv.servicing_order_type == order_type or \
                         current_agv.servicing_order_type is None and current_agv.free:
                     distance = hypot(position[0] - agv[0], position[1] - agv[1])
                     if distance < min_distance:
@@ -600,11 +626,56 @@ class AgvManager:
             utl_sum += agv.utilization
         return utl_sum / len(self.agv_index)
 
+    def get_average_charging_utilization(self):
+        utl_sum = 0
+        for agv_id, agv in self.agv_index.items():
+            utl_sum += agv.charging_utilization
+        return utl_sum / len(self.agv_index)
+
     def get_battery_level_per_agv(self):
         battery_levels = []
         for agv in self.agv_index:
             battery_levels.append(self.agv_index[agv].battery)
         return battery_levels
+
+    def get_battery_level_per_agv_free(self) -> list:
+        battery_levels = []
+        for agv_id in self.agv_index:
+            agv = self.agv_index[agv_id]
+            if agv.free:
+                battery_levels.append(agv.battery)
+        if battery_levels:
+            return battery_levels
+        else:
+            return [0]
+
+    def get_average_agv_battery_free(self):
+        return np.average(self.get_battery_level_per_agv_free())
+
+    def get_battery_level_per_agv_working(self) -> list:
+        battery_levels = []
+        for agv_id in self.agv_index:
+            agv = self.agv_index[agv_id]
+            if not agv.free and not agv.charging_needed:
+                battery_levels.append(agv.battery)
+        if battery_levels:
+            return battery_levels
+        else:
+            return [0]
+
+    def get_average_agv_battery_working(self):
+        return np.average(self.get_battery_level_per_agv_working())
+
+    def get_battery_level_per_agv_charging(self) -> list:
+        battery_levels = []
+        for agv_id in self.agv_index:
+            agv = self.agv_index[agv_id]
+            if agv.charging_needed:
+                battery_levels.append(agv.battery)
+        return battery_levels
+
+    def get_average_agv_battery_charging(self):
+        return np.average(self.get_battery_level_per_agv_charging())
 
     def get_average_agv_battery(self):
         return np.average(self.get_battery_level_per_agv())
@@ -618,6 +689,22 @@ class AgvManager:
             if self.agv_index[agv].charging_needed == True:
                 n_depleted += 1
         return n_depleted
+
+    def get_n_busy_agvs(self):
+        n_busy = 0
+        for agv_id in self.agv_index:
+            agv = self.agv_index[agv_id]
+            if not agv.free and not agv.charging_needed:
+                n_busy += 1
+        return n_busy
+
+    def get_n_free_agvs(self):
+        n_free = 0
+        for agv_id in self.agv_index:
+            agv = self.agv_index[agv_id]
+            if agv.free:
+                n_free += 1
+        return n_free
 
     def get_n_charged_agvs(self):
         n_depleted = 0
@@ -634,6 +721,12 @@ class AgvManager:
         self.relocating_agvs.remove(agv_id)
         self.stationary_amr_positions.add(idle_station)
 
+    def get_battery_per_agv(self):
+        battery_level_per_agv = {agv_id: 0 for agv_id in self.agv_index.keys()}
+        for agv_id in self.agv_index.keys():
+            battery_level_per_agv[agv_id] = self.agv_index[agv_id].battery
+        return battery_level_per_agv
+
     def update_trackers_on_charging_end(self):
         self.agv_trackers.n_charges += 1
         total_battery = 0
@@ -642,13 +735,13 @@ class AgvManager:
         self.agv_trackers.avg_battery_level = total_battery / len(self.agv_index)
 
         for agv_id in self.agv_index.keys():
-            self.agv_trackers.battery_level_per_agv[agv_id]\
+            self.agv_trackers.battery_level_per_agv[agv_id] \
                 = self.agv_index[agv_id].battery
-            self.agv_trackers.charges_per_agv[agv_id]\
+            self.agv_trackers.charges_per_agv[agv_id] \
                 = self.agv_index[agv_id].n_charging_stops
 
         for cs in self.booked_charging_stations.keys():
-            self.agv_trackers.queue_per_station[cs]\
+            self.agv_trackers.queue_per_station[cs] \
                 = len(self.booked_charging_stations[cs])
 
 

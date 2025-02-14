@@ -17,8 +17,7 @@ from slapstack.interface_templates import SimulationParameters, SlapLogger, \
 
 class SlapEnv(gym.Env):
     def __init__(self, environment_parameters: SimulationParameters, seeds='',
-                 partitions='',
-                 logger: Union[SlapLogger, str, None] = None,
+                 partitions=[None], logger: Union[SlapLogger, str, None] = None,
                  state_converter: Union[OutputConverter, None] = None,
                  action_converters: Union[List[StorageStrategy], None] = None):
         self.last_reward = None
@@ -41,15 +40,16 @@ class SlapEnv(gym.Env):
             init_partition = None
         self.__env_input = Input(environment_parameters, init_seed, init_partition)
         self.__core = SlapCore(deepcopy(self.__env_input), logger)
+        self.max_episode_steps = len(self.env_input.params.order_list)
         self.__core.reset(None)
         self.__output_converter = state_converter
-
         if state_converter:
             self.feature_list = state_converter.feature_list
         self.__strategy_configuration = -1
         self.__storage_strategies = None
         self.__retrieval_strategies = None
         self.__charging_strategies = None
+        self.__go_charging_strategies = None
         self.__setup_strategies(action_converters
                                 if action_converters is not None else [])
         self.action_space = None
@@ -57,6 +57,11 @@ class SlapEnv(gym.Env):
         self.__get_action_space()
         self.__get_observation_space()
         self.done_during_init = False
+        # Reward shaping
+        self.last_reward = None
+        self.last_action_taken = None
+        self.last_potential = None  # To store Φ(s) of the last state
+        self.gamma = 0.99
         if self.autoplay():
             _, _, done = self.__skip_fixed_decisions(False)
             if done:
@@ -65,10 +70,10 @@ class SlapEnv(gym.Env):
     def make_deterministic(self):
         travel_events = []
         for event in self.__core.events.running:
-            if (isinstance(event, DeliveryFirstLeg) or
-                    isinstance(event,DeliverySecondLeg) or
-                    isinstance(event, RetrievalFirstLeg) or
-                    isinstance(event, RetrievalSecondLeg)):
+            if isinstance(event, DeliveryFirstLeg) or isinstance(event,
+                    DeliverySecondLeg) or isinstance(event,
+                    RetrievalFirstLeg) or isinstance(event,
+                    RetrievalSecondLeg):
                 heap.heappush(travel_events, event)
         self.__core.events.running = travel_events
 
@@ -83,7 +88,7 @@ class SlapEnv(gym.Env):
         :param selectable_strategies: The list of strategies.
         :return: None
         """
-        sto_opt, ret_opt, ch_opt = [], [], []
+        sto_opt, ret_opt, ch_opt, gc_opt = [], [], [], []
         for strategy in selectable_strategies:
             if strategy.type == 'delivery':
                 sto_opt.append(strategy)
@@ -91,11 +96,14 @@ class SlapEnv(gym.Env):
                 ret_opt.append(strategy)
             elif strategy.type == 'charging':
                 ch_opt.append(strategy)
+            elif strategy.type == 'go_charging':
+                gc_opt.append(strategy)
             else:
                 raise Exception("no target mode set")
         self.__storage_strategies = np.array(sto_opt)
         self.__retrieval_strategies = np.array(ret_opt)
         self.__charging_strategies = np.array(ch_opt)
+        self.__go_charging_strategies = np.array(gc_opt)
         self.__setup_strategy_config()
 
     def step(self, action: Union[int, np.ndarray]):
@@ -103,7 +111,7 @@ class SlapEnv(gym.Env):
         if self.__core.state.params.charging_thresholds:
             self.last_action_taken = action
         else:
-            self.last_action_taken = action[0]
+            self.last_action_taken = action#[0]
         decision_mode = self.__core.decision_mode
         direct_action = self.__transform_action(action)
         state, done = self.__core.step(direct_action)
@@ -115,16 +123,32 @@ class SlapEnv(gym.Env):
             # something other than RL is using this simulation
             if self.autoplay() and not done:
                 state, reward, done = self.__skip_fixed_decisions(done)
-            return state, None, done, {}
+            return state, None, done, False, {}
         legal_actions = self.get_legal_actions()
         state_repr = self.__output_converter.modify_state(self.__core.state)
         reward = self.__output_converter.calculate_reward(self.__core.state, action, legal_actions,
-                                                          decision_mode)
+                                                          decision_mode, agv_id=state.current_agv)
         self.last_reward = reward
+        # if self.__output_converter.reward_setting == 0:
+        if done:
+            reward = - state.trackers.average_service_time
         # self.__update_strategies(direct_action)
         if self.autoplay() and not done:
             # state_repr, reward, done = self.__skip_fixed_decisions(done)
             state_repr, _, done = self.__skip_fixed_decisions(done)
+        # if (self.core_env.state.trackers.n_queued_delivery_orders > 240
+        #         or self.core_env.state.trackers.n_queued_retrieval_orders > 330):
+        #     done = True
+        #     reward = - len(self.core_env.state.incomplete_orders)
+        # if self.core_env.events.all_orders_complete():
+            # if - state.trackers.average_service_time > self.__output_converter.kpi_last_episode:
+            #     reward = 10
+            # elif - state.trackers.average_service_time < self.__output_converter.kpi_last_episode:
+            #     reward = -10
+            # else:
+            #     reward = 0
+            # self.__output_converter.kpi_last_episode = - state.trackers.average_service_time
+            # reward = - state.trackers.average_service_time
         return state_repr, reward, done, False, {}
 
     def test_sameSKU(self):
@@ -186,6 +210,7 @@ class SlapEnv(gym.Env):
     def reset(self, seed=None, options=None):
         # self.__core = SlapCore(self.__env_input)
         # seed cycling if seeds were passed
+        self.last_potential = None
         if ((bool(self.__seeds_remaining) or bool(self.__seeds_used)) or
                 (bool(self.__partitions_remaining) or bool(self.__partitions_used))):
             if len(self.__seeds_remaining) > 0:
@@ -211,16 +236,15 @@ class SlapEnv(gym.Env):
         if self.autoplay():
             self.__skip_fixed_decisions(False)
         if self.__output_converter is not None:
-            self.__output_converter.reset()
+            self.__output_converter.reset(), None
             return self.__output_converter.modify_state(
-                self.__core.state), None
+                self.__core.state), {}
         else:
             return self.__core.state
 
     def __skip_fixed_decisions(self, done):
         state_repr, reward = None, 0
         while self.autoplay() and not done:
-            # self.core_env.state.current_agv = self.core_env.previous_event.agv_id
             if self.__core.state.current_order == "delivery":
                 action = self.__storage_strategies[0].get_action(
                     self.__core.state)
@@ -245,7 +269,11 @@ class SlapEnv(gym.Env):
                 else:
                     state_repr = state
             elif self.__core.state.current_order == "charging_check":
-                action = self.core_env.state.agv_manager.charge_needed(False, self.core_env.previous_event.agv.id)
+                if self.__go_charging_strategies[0]:
+                    action = self.__go_charging_strategies[0].get_action(self.__core.state,
+                                                                         self.core_env.previous_event.agv.id)
+                else:
+                    action = self.core_env.state.agv_manager.charge_needed(False, self.core_env.previous_event.agv.id)
                 state, done = self.__core.step(action)
                 if self.__output_converter:
                     state_repr = self.__output_converter.modify_state(self.__core.state)
@@ -271,13 +299,21 @@ class SlapEnv(gym.Env):
             #     assert state_repr.shape == (900, )
         if self.__core.decision_mode == "charging" or self.__core.decision_mode == "charging_check":
             self.current_state_repr = state_repr
+            window_end = self.__core.state.time + 3600
+            orders_next_hour = 0
+            for order_time in self.core_env.events.order_times:
+                if order_time >= window_end:
+                    break
+                if self.__core.state.time <= order_time <= window_end:
+                    orders_next_hour += 1
+            self.__core.state.orders_next_hour = orders_next_hour
             # self.core_env.state.current_agv = self.core_env.previous_event.agv.id
         return state_repr, reward, done
 
     def autoplay(self):
         """
         checks whether the next action can be played automatically, like
-        when there is a fixed strategy (config 1, 3, 4, 5 and 7)
+        when there is a fixed strategy (configs 1, 3, 4, 5 and 7)
          """
         return ((self.__core.decision_mode == "delivery" and
                  self.__strategy_configuration in {3, 4, 5, 9}) or
@@ -303,7 +339,7 @@ class SlapEnv(gym.Env):
          6: Selectable storage strategy and direct retrieval action
          7: Selectable storage strategy and fixed retrieval strategy
          8: Selectable storage and retrieval strategies
-         9: Fixed storage strategy, fixed retrieval strategy and fixed charging strategy run
+         9: Fixed storage strategy, fixed retrieval strategy and fixed charging strategy
 
         :return: None
         """
@@ -311,7 +347,8 @@ class SlapEnv(gym.Env):
         n_ss = self.__storage_strategies.shape[0]
         n_rs = self.__retrieval_strategies.shape[0]
         n_cs = self.__charging_strategies.shape[0]
-        if n_ss == 1 and n_rs == 1 and n_cs == 1:
+        n_gc = self.__go_charging_strategies.shape[0]
+        if n_ss == 1 and n_rs == 1 and n_cs == 1 and n_gc == 0:
             self.__strategy_configuration = 9
         elif n_ss == 0 and n_rs == 0:  # direct actions only
             self.__strategy_configuration = 0
@@ -321,7 +358,7 @@ class SlapEnv(gym.Env):
             self.__strategy_configuration = 2
         elif n_ss == 1 and n_rs == 0:
             self.__strategy_configuration = 3
-        elif n_ss == 1 and n_rs == 1:
+        elif n_ss == 1 and n_rs == 1 and n_gc == 1:
             self.__strategy_configuration = 4
         elif n_ss == 1 and n_rs > 1:
             self.__strategy_configuration = 5
@@ -375,11 +412,18 @@ class SlapEnv(gym.Env):
         elif self.__strategy_configuration == 7:
             self.action_space = gym.spaces.Discrete(n_ss)
         elif self.__strategy_configuration == 9:
-            # Go to charging -> binary decision
             if isinstance(self.__core.inpt.params.charging_thresholds, tuple):
+                # not used right now
                 low, high = self.__core.inpt.params.charging_thresholds
                 self.action_space = gym.spaces.Box(low=low, high=high)
+            if isinstance(self.__core.inpt.params.charging_thresholds, list):
+                # combined go charging and charging duration decision
+                n_thresholds = len(self.__core.inpt.params.charging_thresholds)
+                n_cs = self.core_env.state.agv_manager.n_charging_stations
+                self.action_space = gym.spaces.Discrete(n_thresholds)
+                # self.action_space = gym.spaces.MultiDiscrete([n_thresholds, n_cs+1])
             else:
+                # Go to charging -> binary decision
                 self.action_space = gym.spaces.discrete.Discrete(2)
         else:  # self.__strategy_configuration == 8:
             self.action_space = gym.spaces.Discrete(n_ss + n_rs)
@@ -410,7 +454,7 @@ class SlapEnv(gym.Env):
         :return: The action compatible with the core.
         """
         if ((self.__core.decision_mode == "charging" and
-             not self.__output_converter) or
+            not self.__output_converter) or
                 (self.__core.decision_mode == "charging_check" and not self.__output_converter)):
             # TODO: skip if RL
             return self.__transform_a_charging_duration(agent_action)
@@ -459,6 +503,7 @@ class SlapEnv(gym.Env):
         else:
             return self.__retrieval_strategies[0].get_action(self.__core.state)
 
+
     def __transform_a_direct_storage_selectable_retrieval(self, agent_action):
         # config 2
         if self.__core.decision_mode == "delivery":
@@ -492,7 +537,21 @@ class SlapEnv(gym.Env):
             return self.__storage_strategies[0].get_action(self.__core.state)
         elif self.__core.decision_mode == "charging_check":
             # return agent_action[0].item()
-            return agent_action
+            if len(self.__core.inpt.params.charging_thresholds) > 2:
+                if agent_action == 0:
+                    return agent_action
+                #     print()
+                threshold = self.env_input.params.charging_thresholds[
+                    agent_action]
+                agv_id = self.core_env.previous_event.agv_id
+                agvm = self.core_env.state.agv_manager
+                agv = self.core_env.state.agv_manager.agv_index[agv_id]
+                charge_to_full = threshold - agv.battery
+                charging_duration = charge_to_full / agvm.charging_rate
+                # charging_duration = threshold / agvm.charging_rate
+                return charging_duration
+            elif len(self.__core.inpt.params.charging_thresholds) == 2:
+                return agent_action
         else:
             return self.__retrieval_strategies[0].get_action(self.__core.state)
 
@@ -558,14 +617,65 @@ class SlapEnv(gym.Env):
         agv_id = state.current_agv
         agv = state.agv_manager.agv_index[agv_id]
         battery_level = agv.battery
-        # charging_thresholds = np.array(state.params.charging_thresholds)
-        # mask = (charging_thresholds == 0) | (charging_thresholds > battery_level)
-        mask = [1, 1]
-        # If battery level is below 20%, action 0 (Don't charge) is invalid
-        if battery_level < 20:
-            mask[0] = 0
-        return np.array(mask)
+        charging_thresholds = np.array(state.params.charging_thresholds)
+        n_cs = state.agv_manager.n_charging_stations
+        if isinstance(self.action_space, gym.spaces.multi_discrete.MultiDiscrete):
+            # First dimension mask
+            mask = charging_thresholds > battery_level
+            if battery_level <= 20:
+                mask[0] = False
+            else:
+                mask[0] = True
 
+            # Second dimension mask
+            cs_mask = np.zeros([n_cs + 1])
+            cs_mask[0] = 1
+
+            for cs_idx, cs in enumerate(state.agv_manager.queued_charging_events):
+                if state.agv_manager.queued_charging_events[cs]:
+                    e = state.agv_manager.queued_charging_events[cs][0]
+                    agv_id = e.agv_id
+                    agv = state.agv_manager.agv_index[agv_id]
+                    target_battery = e.check_battery_charge(state)
+                    if target_battery > 30:
+                        cs_mask[cs_idx + 1] = 1
+
+            # if cs_mask.sum() > 1:
+            #     cs_mask[0] = 0
+
+            # Create a single flat array of the correct size
+            total_mask = np.ones(sum(self.action_space.nvec), dtype=np.bool8)
+
+            # Fill in the mask values at the correct positions
+            start_idx = 0
+            for dim_idx, dim_size in enumerate(self.action_space.nvec):
+                if dim_idx == 0:
+                    total_mask[start_idx:start_idx + dim_size] = mask
+                else:
+                    total_mask[start_idx:start_idx + dim_size] = cs_mask
+                start_idx += dim_size
+
+            return total_mask
+
+        if self.action_space.n == 2 and state.params.charging_thresholds[1] == 100:
+            mask = np.array([True, True])
+            if battery_level < 20:
+                mask[0] = False
+            return mask
+        else:
+            mask = charging_thresholds > battery_level
+            if battery_level <= 20:
+                mask[0] = False
+            else:
+                mask[0] = True
+            try:
+                assert battery_level >= 0
+            except:
+                print("Error in mask")
+            return mask
+
+    def action_masks(self) -> List[bool]:
+        return self.valid_action_mask()
     # </editor-fold>
 
     def __deepcopy__(self, memo):
