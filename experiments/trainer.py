@@ -205,6 +205,7 @@ def run_evaluation(cfg, model, storage_strategy, state_converter=True):
             partition_by_week=cfg.sim_params.partition_by_week,
             partition_by_day=cfg.sim_params.partition_by_day,
             n_agvs=cfg.sim_params.n_agvs,
+            n_cs=cfg.sim_params.n_cs,
             generate_orders=cfg.sim_params.generate_orders,
             verbose=cfg.sim_params.verbose,
             resetting=cfg.sim_params.resetting,
@@ -273,15 +274,15 @@ def main(cfg: DictConfig):
     layout_present = pd.read_csv(layout_path_present, header=None, delimiter=",")
 
     n_cs_present = count_charging_stations(layout_present)
-    if n_cs_present != cfg.experiment.n_cs:
+    if n_cs_present != cfg.sim_params.n_cs:
         delete_prec_dima(BASE_DIR, cfg.sim_params.use_case)
         use_case_base = cfg.sim_params.use_case.split("_")[0]
         layout_base = pd.read_csv(layout_path_base, header=None, delimiter=",")
         layout_new = pd.DataFrame()
         if cfg.sim_params.use_case == "wepastacks_bm":
-            layout_new = gen_charging_stations(layout_base, cfg.experiment.n_cs)
+            layout_new = gen_charging_stations(layout_base, cfg.sim_params.n_cs)
         elif cfg.sim_params.use_case == "crossstacks_bm":
-            layout_new = gen_charging_stations_left(layout_base, cfg.experiment.n_cs)
+            layout_new = gen_charging_stations_left(layout_base, cfg.sim_params.n_cs)
         layout_new.to_csv(layout_path_present,
             header=None, index=False)
 
@@ -305,6 +306,7 @@ def main(cfg: DictConfig):
         partition_by_week=cfg.sim_params.partition_by_week,
         partition_by_day=cfg.sim_params.partition_by_day,
         n_agvs=cfg.sim_params.n_agvs,
+        n_cs=cfg.sim_params.n_cs,
         generate_orders=cfg.sim_params.generate_orders,
         verbose=cfg.sim_params.verbose,
         resetting=cfg.sim_params.resetting,

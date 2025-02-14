@@ -196,14 +196,14 @@ class CombinedChargingPolicy(ChargingStrategy):
     def get_action(self, state: 'State', agv_id: int) -> int:
         go_charging = False
         agv: AGV = state.agv_manager.agv_index[agv_id]
-        if self.name == "FixedCharge" or self.name == "Fixed" or self.name == "StateBased":
+        if self.name == "FixedCharge" or self.name == "Fixed" or self.name == "HighLow":
             go_charging = self.fixed(agv)
         elif self.name == "Opportunistic":
             go_charging = self.opportunistic(state, agv_id)
         else:
             print("go charging strategy not specified")
         if go_charging:
-            if self.name == "StateBased":
+            if self.name == "HighLow":
                 if self._queue_len(state) > 0:
                     charge_to_full = self.upper_threshold - agv.battery
                 else:

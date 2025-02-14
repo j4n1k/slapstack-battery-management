@@ -140,12 +140,11 @@ def get_charging_strategies():
         # FixedChargePolicy(80),
         # FixedChargePolicy(90),
         # FixedChargePolicy(100),
-        # RandomChargePolicy([40, 50, 60, 70, 80], 1)
         # OpportunityChargePolicy(name="opportunity"),
         # OpportunityPlusChargePolicy
         # LowTHChargePolicy(20),
         CombinedChargingPolicy(20, 40, name="StateBased"),
-        # CombinedChargingPolicy(20, 90, name="StateBased"),
+        # CombinedChargingPolicy(20, 90, name="HighLow"),
         # CombinedChargingPolicy(20, 30, name="Fixed"),
         # CombinedChargingPolicy(20, 40, name="Fixed"),
         # CombinedChargingPolicy(20, 50, name="Fixed"),
@@ -154,13 +153,6 @@ def get_charging_strategies():
         # CombinedChargingPolicy(20, 80, name="Fixed"),
         # CombinedChargingPolicy(20, 90, name="Fixed"),
         # CombinedChargingPolicy(20, 100, name="Fixed"),
-        # CombinedChargingPolicy(20, 30, name="Opportunistic"),
-        # CombinedChargingPolicy(20, 40, name="Opportunistic"),
-        # CombinedChargingPolicy(20, 50, name="Opportunistic"),
-        # CombinedChargingPolicy(20, 60, name="Opportunistic"),
-        # CombinedChargingPolicy(20, 70, name="Opportunistic"),
-        # CombinedChargingPolicy(20, 80, name="Opportunistic"),
-        # CombinedChargingPolicy(20, 90, name="Opportunistic"),
         # CombinedChargingPolicy(20, 100, name="Opportunistic")
     ]
 
@@ -221,10 +213,6 @@ if __name__ == '__main__':
                       ClosestOpenLocation(very_greedy=False),
                       FixedChargePolicy(100)]] * n_charging_strategies
                      )))
-    # Fixed No interrupt X
-    # Fixed Interrupt
-    # Opportunity No Interrupt X
-    # Opportunity Interrupt X
 
     # Strategies with charging
     # all_combinations = [
