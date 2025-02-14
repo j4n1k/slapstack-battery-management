@@ -58,11 +58,11 @@ def get_rl_env(sim_parameters: SimulationParameters,
                          ClosestOpenLocation(very_greedy=False),
                          FixedChargePolicy(100)]
 
-    feature_list = ["n_depleted_agvs", "avg_battery", "utilization",
-                    "queue_len_charging_station", "global_fill_level",
-                    "curr_agv_battery", "dist_to_cs",
-                    "queue_len_retrieval_orders", "queue_len_delivery_orders",
-                    "hour_sin", "hour_cos", "day_of_week"]
+    feature_list = ["n_depleted_agvs", "n_free_agv", "n_working_agvs", "avg_battery_working",
+                     "battery_cs1", "battery_cs2", "utilization", "queue_len_cs1", "queue_len_cs2",
+                     "global_fill_level", "curr_agv_battery", "dist_to_cs",
+                     "queue_len_retrieval_orders", "queue_len_delivery_orders",
+                     "hour_sin", "hour_cos", "day_of_week", "free_cs_available", "avg_entropy"]
 
     decision_mode = "charging_check"
 

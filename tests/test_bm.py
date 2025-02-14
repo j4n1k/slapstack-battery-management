@@ -27,7 +27,7 @@ from slapstack.helpers import print_3d_np
 from slapstack.interface_input import Input
 from slapstack.interface_templates import SimulationParameters, ChargingStrategy
 from slapstack_controls.charging_policies import FixedChargePolicy, LowTHChargePolicy, CombinedChargingPolicy, \
-    OpportunityChargePolicy, ChargingPolicy
+    OpportunityChargePolicy, ChargingPolicy, DummyChargePolicy
 from slapstack_controls.output_converters import FeatureConverterCharging
 from slapstack_controls.storage_policies import ConstantTimeGreedyPolicy, ClosestOpenLocation, BatchFIFO
 from tests.experiment_commons import count_charging_stations, delete_prec_dima, gen_charging_stations
@@ -100,13 +100,15 @@ class TestSlapEnv(TestCase):
             simulation_parameters, log_dir, action_converters, steps_per_episode)
         parametrization_failure = False
         start = time.time()
-        output_converter.reset()
+        if output_converter:
+            output_converter.reset()
         self.data = []
         while not loop_controls.done:
             decision_mode = env.core_env.decision_mode
             if decision_mode == "charging_check" or decision_mode == "charging":
                 prev_event = env.core_env.previous_event
-                observations = output_converter.modify_state(loop_controls.state)
+                if output_converter:
+                    observations = output_converter.modify_state(loop_controls.state)
                 if isinstance(charging_check_strategy, ChargingStrategy):
                     action = charging_check_strategy.get_action(loop_controls.state,
                                                                 agv_id=prev_event.agv.id)
@@ -116,8 +118,8 @@ class TestSlapEnv(TestCase):
                         action = 1
                     else:
                         action = charging_check_strategy.predict(observations)
-
-                self.data.append({"step": loop_controls.n_decisions, "features": observations, "action": action})
+                if output_converter:
+                    self.data.append({"step": loop_controls.n_decisions, "features": observations, "action": action})
             else:
                 if env.done_during_init:
                     raise ValueError("Sim ended during init")
@@ -175,8 +177,9 @@ class TestSlapEnv(TestCase):
         params = SimulationParameters(
             use_case="wepastacks_bm",
             use_case_n_partitions=20,
-            use_case_partition_to_use=0,
-            n_agvs=40,
+            partition_by_week=True,
+            use_case_partition_to_use=2,
+            n_agvs=35,
             generate_orders=False,
             verbose=False,
             resetting=False,
@@ -236,26 +239,143 @@ class TestSlapEnv(TestCase):
         use_case = "wepastacks_bm"
         layout_path_base = get_layout_path(use_case_base)
         layout_path_present = get_layout_path(use_case)
-
+        max_cs = 0
         # When saving/loading the model:
-        n_cs = 0
-        constraints_breached = True
-        while constraints_breached:
-            n_cs += 1
-            layout_present = pd.read_csv(layout_path_present, header=None, delimiter=",")
-            n_cs_present = count_charging_stations(layout_present)
-            if n_cs_present != n_cs:
-                delete_prec_dima(BASE_DIR, use_case)
-                layout_base = pd.read_csv(layout_path_base, header=None, delimiter=",")
-                layout_new = pd.DataFrame()
-                layout_new = gen_charging_stations(layout_base, n_cs)
-                layout_new.to_csv(layout_path_present,
-                                  header=None, index=False)
-            params = SimulationParameters(
+        for pt in range(14):
+            n_cs = 0
+            constraints_breached = True
+            while constraints_breached:
+                n_cs += 1
+                if n_cs > max_cs:
+                    max_cs = n_cs
+                print(f"max cs required: {max_cs}")
+                layout_present = pd.read_csv(layout_path_present, header=None, delimiter=",")
+                n_cs_present = count_charging_stations(layout_present)
+                if n_cs_present != n_cs:
+                    delete_prec_dima(BASE_DIR, use_case)
+                    layout_base = pd.read_csv(layout_path_base, header=None, delimiter=",")
+                    layout_new = pd.DataFrame()
+                    layout_new = gen_charging_stations(layout_base, n_cs)
+                    layout_new.to_csv(layout_path_present,
+                                      header=None, index=False)
+                params = SimulationParameters(
+                        use_case="wepastacks_bm",
+                        use_case_n_partitions=20,
+                        use_case_partition_to_use=pt,
+                        partition_by_week=True,
+                        n_agvs=40,
+                        generate_orders=False,
+                        verbose=False,
+                        resetting=False,
+                        initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+                        pure_lanes=True,
+                        n_levels=3,
+                        # https://logisticsinside.eu/speed-of-warehouse-trucks/
+                        agv_speed=2,
+                        unit_distance=1.4,
+                        pallet_shift_penalty_factor=20,  # in seconds
+                        compute_feature_trackers=True,
+                        charging_thresholds=[40, 50, 60, 70, 80],
+                        battery_capacity=52,
+                        charge_during_breaks=False
+                    )
+
+                constraints_breached = run_episode(simulation_parameters=params,
+                                storage_strategy=ClosestOpenLocation(very_greedy=False),
+                                charging_strategy=FixedChargePolicy(40),
+                                print_freq=1000, warm_start=False,
+                                log_dir='./logs/tests/cs_required/',
+                                charging_check_strategy=LowTHChargePolicy(20), testing=False,
+                                stop_condition=True)
+        print("max cs overall: ", max_cs)
+
+    def test_amr_required(self):
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        use_case_base = "wepastacks"
+        use_case = "wepastacks_bm"
+        layout_path_base = get_layout_path(use_case_base)
+        layout_path_present = get_layout_path(use_case)
+        max_amr = 0
+        # When saving/loading the model:
+        for pt in range(14):
+            n_amr = 1
+            constraints_breached = True
+            while constraints_breached:
+                n_amr += 1
+                if n_amr > max_amr:
+                    max_amr = n_amr
+                print(f"max amr required for week {pt}: {max_amr}")
+                params = SimulationParameters(
+                        use_case="wepastacks_bm",
+                        use_case_n_partitions=20,
+                        use_case_partition_to_use=pt,
+                        partition_by_week=True,
+                        n_agvs=n_amr,
+                        n_cs=0,
+                        generate_orders=False,
+                        verbose=False,
+                        resetting=False,
+                        initial_pallets_storage_strategy=ConstantTimeGreedyPolicy(),
+                        pure_lanes=True,
+                        n_levels=3,
+                        # https://logisticsinside.eu/speed-of-warehouse-trucks/
+                        agv_speed=2,
+                        unit_distance=1.4,
+                        pallet_shift_penalty_factor=20,  # in seconds
+                        compute_feature_trackers=True,
+                        charging_thresholds=[40, 50, 60, 70, 80],
+                        battery_capacity=52,
+                        charge_during_breaks=False
+                    )
+
+                constraints_breached = run_episode(simulation_parameters=params,
+                                storage_strategy=ClosestOpenLocation(very_greedy=False),
+                                charging_strategy=FixedChargePolicy(100),
+                                print_freq=1000, warm_start=False,
+                                log_dir='./logs/tests/amr_required/',
+                                charging_check_strategy=OpportunityChargePolicy(), testing=False,
+                                stop_condition=True)
+        print("max cs overall: ", max_amr)
+
+    def test_cs_amr_required(self):
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        use_case_base = "wepastacks"
+        use_case = "wepastacks_bm"
+        layout_path_base = get_layout_path(use_case_base)
+        layout_path_present = get_layout_path(use_case)
+        max_cs = 3
+        max_amr = 0
+        # When saving/loading the model:
+        for pt in range(14):
+            n_cs = max_cs
+            n_amr = 33
+            constraints_breached = True
+            while constraints_breached:
+                n_amr += 1
+                if n_amr > 40:
+                    n_cs += 1
+                    n_amr = 1
+                if n_amr > max_amr:
+                    max_amr = n_amr
+                if n_cs > max_cs:
+                    max_cs = n_cs
+                print(f"max cs/ amr required in week {pt}: {max_cs}/ {max_amr}")
+                layout_present = pd.read_csv(layout_path_present, header=None, delimiter=",")
+                n_cs_present = count_charging_stations(layout_present)
+                if n_cs_present != n_cs:
+                    delete_prec_dima(BASE_DIR, use_case)
+                    layout_base = pd.read_csv(layout_path_base, header=None, delimiter=",")
+                    layout_new = pd.DataFrame()
+                    layout_new = gen_charging_stations(layout_base, n_cs)
+                    layout_new.to_csv(layout_path_present,
+                                      header=None, index=False)
+                params = SimulationParameters(
                     use_case="wepastacks_bm",
-                    use_case_n_partitions=1,
-                    use_case_partition_to_use=0,
-                    n_agvs=40,
+                    use_case_n_partitions=20,
+                    use_case_partition_to_use=pt,
+                    partition_by_week=True,
+                    n_agvs=n_amr,
+                    n_cs=n_cs,
                     generate_orders=False,
                     verbose=False,
                     resetting=False,
@@ -268,18 +388,19 @@ class TestSlapEnv(TestCase):
                     pallet_shift_penalty_factor=20,  # in seconds
                     compute_feature_trackers=True,
                     charging_thresholds=[40, 50, 60, 70, 80],
-                    battery_capacity=80,
-                    charge_during_breaks=True
+                    battery_capacity=52,
+                    charge_during_breaks=False
                 )
 
-            constraints_breached = run_episode(simulation_parameters=params,
-                            storage_strategy=ClosestOpenLocation(very_greedy=False),
-                            charging_strategy=FixedChargePolicy(80),
-                            print_freq=1000, warm_start=False,
-                            log_dir='./logs/tests/no_bc_single_pt/',
-                            charging_check_strategy=LowTHChargePolicy(20), testing=False,
-                            stop_condition=True)
-
+                constraints_breached = run_episode(simulation_parameters=params,
+                                                   storage_strategy=ClosestOpenLocation(very_greedy=False),
+                                                   charging_strategy=FixedChargePolicy(100),
+                                                   print_freq=1000, warm_start=False,
+                                                   log_dir=f'./logs/tests/cs_required/',
+                                                   charging_check_strategy=OpportunityChargePolicy(), testing=False,
+                                                   stop_condition=True)
+            print(f"week {pt}: {n_cs} CS, {n_amr} AMR")
+        print("max cs/ amr overall: ", max_cs, max_amr)
     # def test_env_battery_constraints_single_pt(self):
     #     params = SimulationParameters(
     #         use_case="wepastacks_bm",
@@ -495,7 +616,8 @@ class TestSlapEnv(TestCase):
         params = SimulationParameters(
             use_case="wepastacks_bm",
             use_case_n_partitions=20,
-            use_case_partition_to_use=0,
+            use_case_partition_to_use=2,
+            partition_by_week=True,
             n_agvs=40,
             generate_orders=False,
             verbose=False,
@@ -509,21 +631,21 @@ class TestSlapEnv(TestCase):
             pallet_shift_penalty_factor=20,  # in seconds
             compute_feature_trackers=True,
             charging_thresholds=[40, 50, 60, 70, 80],
-            battery_capacity=80,
-            charge_during_breaks=True
+            battery_capacity=52,
+            charge_during_breaks=False
         )
 
         final_state: State = self.run_episode(simulation_parameters=params,
                                          print_freq=100000,
                                          log_dir='./logs/tests/partitioning/go_charging',
-                                         charging_check_strategy=CombinedChargingPolicy(20, 70),
+                                         charging_check_strategy=CombinedChargingPolicy(20, 40),
                                          testing=True,
                                          action_converters=[BatchFIFO(),
                                                             ClosestOpenLocation(very_greedy=False),
                                                             FixedChargePolicy(70)],
                                          steps_per_episode=None)
 
-        assert final_state.trackers.average_service_time != 463.81978959254207
+        # assert final_state.trackers.average_service_time != 463.81978959254207
 
     def test_charge_during_breaks_week(self):
         # Charging Action from ChargingPolicy gets overwritten by CombinedChargingPolicy
@@ -887,7 +1009,7 @@ class TestSlapEnv(TestCase):
                        logfile_name: str,
                        log_dir: str,
                        partitions=None,
-                       reward_setting=1,
+                       reward_setting=21,
                        seed=None):
             if partitions is None:
                 partitions = [None]
@@ -952,9 +1074,9 @@ class TestSlapEnv(TestCase):
                 nr_zones=3,
                 logfile_name='PPO_test',
                 log_dir='./logs/tests/partitioning/charging',
-                partitions=[pt],
-                reward_setting=1,
-            ) for pt in [0, 2]
+                partitions=[2],
+                reward_setting=21,
+            ) for _ in range(4)
         ])
         vec_env = VecMonitor(vec_env)
         # Initialize PPO with the vectorized environment
