@@ -1,6 +1,6 @@
 defaults:
   - model: ppo
-  - task: combined
+  - task: go_charging
   - sim_params: 3cs-40agv-14pt-wepa
   - _self_
 
