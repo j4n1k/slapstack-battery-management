@@ -143,7 +143,7 @@ def get_charging_strategies():
         # OpportunityChargePolicy(name="opportunity"),
         # OpportunityPlusChargePolicy
         # LowTHChargePolicy(20),
-        CombinedChargingPolicy(20, 40, name="StateBased"),
+        CombinedChargingPolicy(20, 40, name="HighLow"),
         # CombinedChargingPolicy(20, 90, name="HighLow"),
         # CombinedChargingPolicy(20, 30, name="Fixed"),
         # CombinedChargingPolicy(20, 40, name="Fixed"),
