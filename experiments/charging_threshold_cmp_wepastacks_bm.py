@@ -132,15 +132,15 @@ def get_charging_strategies():
     charging_strategies = []
 
     charging_strategies += [
-        HighLow(20, 40),
-        Opportunistic(20, 100),
-        FixedThreshold(20, 30),
-        FixedThreshold(20, 40),
-        FixedThreshold(20, 50),
-        FixedThreshold(20, 60),
-        FixedThreshold(20, 70),
-        FixedThreshold(20, 80),
-        FixedThreshold(20, 90),
+        # HighLow(20, 40),
+        # Opportunistic(20, 100),
+        # FixedThreshold(20, 30),
+        # FixedThreshold(20, 40),
+        # FixedThreshold(20, 50),
+        # FixedThreshold(20, 60),
+        # FixedThreshold(20, 70),
+        # FixedThreshold(20, 80),
+        # FixedThreshold(20, 90),
         FixedThreshold(20, 100),
     ]
 

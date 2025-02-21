@@ -257,8 +257,32 @@ The following unit load selection problem (ULSP) policies are implemented:
 # Battery Management
 In this package we introduce battery management related extensions to SLAPStack.  
 This adds charging stations to the warehouse layout and battery consumption and replenishment mechanisms to the AMRs.  
-We further introduce multiple charging strategies to handle the charging decision and charging duration.  
+We further introduce multiple charging strategies to handle the charging decision and charging duration.
+A charging strategy always requires the decision of when to charge and how long to charge.  
+In SLAPStack these decisions can be handled either by two independent policies or by a combined policy.
+We implemented a LowerTHPolicy for the decision when to go charging and a FixedCharge Policy for the charging duration. 
+<p align="center">
+	<img src="1_environment/slapstack/readme/charging_event_chain.png" alt="charging event chain" width="500"/>
+</p>
+If charging is required, a ChargingFirstLeg event is created. 
+The main functionality of this event is to block the depleted AMR to prevent other events from selecting it for tasks and to route it to a charging station. 
+As soon as the AMR arrives at the charging station a ChargingSecondLeg event is created. This requires an action to determine the charging duration. 
+
+To be able to solve the charging and charging duration problem simultaneously, we further implemented a CombinedChargingPolicy that is a special case of the charging decision policy.  
+If it is decided that the AMR has to go charging a charging duration is provided at the same time.   
+The EventChain remains the same but the charging duration of the charging duration strategy is overwritten by the decision of the CombinedChargingPolicy.
+
 The strategies are implemented in SLAPStack-Controls. The performance of different charging strategies can be compared in charging_threshold_cmp_wepastacks_bm.py   
+
+# On the use of action converters
+In SLAPStack numerous decision problems need to be handled simultaneously. To stay true to the gym API most decisions are handled in the background by the so-called autoplay mechanism. This requires us to fix the strategies that do not require a decision from outside in the action_converter.  
+An appropriate action converter to allow for charging decision would look like this: 
+
+[BatchFIFO(),
+ ClosestOpenLocation(very_greedy=False),
+ FixedChargePolicy(100)]
+
+Here we fix the strategies for SLAP, ULSP, and the Charging Duration Problem. 
 
 # Getting Started
 ## Installation
@@ -292,13 +316,14 @@ We make use of hydra config for configuring the reinforcement learning experimen
 To configure the RL experiments three components are necessary that can be found under experiments/config.  
 First we need to specify the model used for training. Second, we need to provide the parameters for the simulation  environment as the use case, number of AMRs and so on. Finally, we need to specify the training task.  
 The training task specifies when the agent has to take an action. Depending on the task we have to use a certain action space. 
-
 Two tasks are possible. We can use "combined" to simultaneously handle charging and charging duration decisions. This requires an action space of [0, 10, ...].
 Further we can use the task charging where the charging decision is selected by a lower threshold and the agent only selects the charging duration. 
+
 
 The configuration is handled in experiments/config.yaml.
 
 What kind of decision is taken by the agent is handled by the strategy configuration and the strategy convertor provided to the environment.
+
 
 ## Citing the Project
 If you use `SLAPStack`, `WEPAStacks` or `CrossStacks` in your research, you can 
