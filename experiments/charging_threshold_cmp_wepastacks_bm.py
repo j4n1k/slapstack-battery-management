@@ -18,11 +18,11 @@ from slapstack_controls.storage_policies import (ClassBasedPopularity,
                                                  ClosestOpenLocation, BatchFIFO, StoragePolicy,
                                                  ConstantTimeGreedyPolicy)
 
-from slapstack_controls.charging_policies import (FixedChargePolicy,
-                                                  RandomChargePolicy,
-                                                  FullChargePolicy,
-                                                  ChargingPolicy, LowTHChargePolicy, OpportunityChargePolicy,
-                                                  OpportunityPlusChargePolicy, CombinedChargingPolicy)
+from slapstack_controls.charging_policies import (ChargingPolicy,
+                                                  LowTHChargePolicy,
+                                                  HighLow,
+                                                  FixedThreshold,
+                                                  Opportunistic, FixedChargePolicy)
 
 
 def get_episode_env(sim_parameters: SimulationParameters,
@@ -132,28 +132,16 @@ def get_charging_strategies():
     charging_strategies = []
 
     charging_strategies += [
-        # FixedChargePolicy(30),
-        # FixedChargePolicy(40),
-        # FixedChargePolicy(50),
-        # FixedChargePolicy(60),
-        # FixedChargePolicy(70),
-        # FixedChargePolicy(80),
-        # FixedChargePolicy(90),
-        # FixedChargePolicy(100),
-        # OpportunityChargePolicy(name="opportunity"),
-        # OpportunityPlusChargePolicy
-        # LowTHChargePolicy(20),
-        CombinedChargingPolicy(20, 40, name="HighLow"),
-        # CombinedChargingPolicy(20, 90, name="HighLow"),
-        # CombinedChargingPolicy(20, 30, name="Fixed"),
-        # CombinedChargingPolicy(20, 40, name="Fixed"),
-        # CombinedChargingPolicy(20, 50, name="Fixed"),
-        # CombinedChargingPolicy(20, 60, name="Fixed"),
-        # CombinedChargingPolicy(20, 70, name="Fixed"),
-        # CombinedChargingPolicy(20, 80, name="Fixed"),
-        # CombinedChargingPolicy(20, 90, name="Fixed"),
-        # CombinedChargingPolicy(20, 100, name="Fixed"),
-        # CombinedChargingPolicy(20, 100, name="Opportunistic")
+        HighLow(20, 40),
+        Opportunistic(20, 100),
+        FixedThreshold(20, 30),
+        FixedThreshold(20, 40),
+        FixedThreshold(20, 50),
+        FixedThreshold(20, 60),
+        FixedThreshold(20, 70),
+        FixedThreshold(20, 80),
+        FixedThreshold(20, 90),
+        FixedThreshold(20, 100),
     ]
 
     return charging_strategies
@@ -182,7 +170,7 @@ if __name__ == '__main__':
         params = SimulationParameters(
             use_case="wepastacks_bm",
             use_case_n_partitions=n_partitions,
-            use_case_partition_to_use=3,
+            use_case_partition_to_use=pt,
             partition_by_week=True if n_partitions == 14 else False,
             n_agvs=40,
             generate_orders=False,

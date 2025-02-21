@@ -299,14 +299,6 @@ class SlapEnv(gym.Env):
             #     assert state_repr.shape == (900, )
         if self.__core.decision_mode == "charging" or self.__core.decision_mode == "charging_check":
             self.current_state_repr = state_repr
-            window_end = self.__core.state.time + 3600
-            orders_next_hour = 0
-            for order_time in self.core_env.events.order_times:
-                if order_time >= window_end:
-                    break
-                if self.__core.state.time <= order_time <= window_end:
-                    orders_next_hour += 1
-            self.__core.state.orders_next_hour = orders_next_hour
             # self.core_env.state.current_agv = self.core_env.previous_event.agv.id
         return state_repr, reward, done
 

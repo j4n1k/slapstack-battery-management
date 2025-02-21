@@ -20,8 +20,6 @@ from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
 from stable_baselines3 import DQN, SAC
 from sb3_contrib import MaskablePPO, RecurrentPPO
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecNormalize, VecMonitor
-from torch import nn
-from torch.optim import Adam
 from torch.utils.tensorboard import SummaryWriter
 import wandb
 # from wandb.integration.sb3 import WandbCallback
@@ -36,10 +34,8 @@ from slapstack.interface_templates import SimulationParameters
 from slapstack_controls.output_converters import FeatureConverterCharging
 from slapstack_controls.storage_policies import ClosestOpenLocation, ConstantTimeGreedyPolicy, BatchFIFO, \
     ClosestToDestination
-from slapstack_controls.charging_policies import (FixedChargePolicy,
-                                                  RandomChargePolicy,
-                                                  FullChargePolicy,
-                                                  ChargingPolicy, LowTHChargePolicy)
+from slapstack_controls.charging_policies import ChargingPolicy, LowTHChargePolicy, FixedChargePolicy
+
 
 def get_env(sim_parameters: SimulationParameters,
             log_frequency: int,

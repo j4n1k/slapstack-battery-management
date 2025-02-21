@@ -1,4 +1,0 @@
-agent:
-  name: "Threshold"
-  model_params:
-    threshold: 70

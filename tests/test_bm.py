@@ -27,7 +27,7 @@ from slapstack.helpers import print_3d_np
 from slapstack.interface_input import Input
 from slapstack.interface_templates import SimulationParameters, ChargingStrategy
 from slapstack_controls.charging_policies import FixedChargePolicy, LowTHChargePolicy, CombinedChargingPolicy, \
-    OpportunityChargePolicy, ChargingPolicy, DummyChargePolicy
+    ChargingPolicy
 from slapstack_controls.output_converters import FeatureConverterCharging
 from slapstack_controls.storage_policies import ConstantTimeGreedyPolicy, ClosestOpenLocation, BatchFIFO
 from tests.experiment_commons import count_charging_stations, delete_prec_dima, gen_charging_stations
