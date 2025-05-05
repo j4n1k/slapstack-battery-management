@@ -301,20 +301,20 @@ class SlapCore(gym.Env):
                and (e.running or retrieval_ok or delivery_ok)):
             self.print("~" * 150 + "\n" + "step no action \n" + "~" * 150)
             self.set_next_main_event_time()
-            if self.charge_during_breaks:
-                charge_time_check = self.time_check_charging()
-                if charge_time_check:
-                    action_needed_last_main_event = None
-                    agvm = self.state.agv_manager
-                    if agvm.charge_in_break_started == False:
-                        # agvm.first_charge_during_break = True
-                        agvm.charge_in_break_started = True
-                        # while e.current_travel:
-                        #     event_to_finish_popped = e.pop_future_event()
-                        #     action_needed_last_main_event = self.handle_event_and_update_env(
-                        #         event_to_finish_popped)
-                        # if not action_needed_last_main_event:
-                    self.perform_charging_during_break()
+            # if self.charge_during_breaks:
+            #     charge_time_check = self.time_check_charging()
+            #     if charge_time_check:
+            #         action_needed_last_main_event = None
+            #         agvm = self.state.agv_manager
+            #         if agvm.charge_in_break_started == False:
+            #             # agvm.first_charge_during_break = True
+            #             agvm.charge_in_break_started = True
+            #             # while e.current_travel:
+            #             #     event_to_finish_popped = e.pop_future_event()
+            #             #     action_needed_last_main_event = self.handle_event_and_update_env(
+            #             #         event_to_finish_popped)
+            #             # if not action_needed_last_main_event:
+            #         self.perform_charging_during_break()
 
             next_event = None
             # if there are serviceable queued events, take care of them first.
